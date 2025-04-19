@@ -1,4 +1,4 @@
-# Trans‑Dimensional Bradley‑Terry (TDBT) Model
+# TDBT: Trans‑Dimensional Bradley‑Terry
 
 ## Overview
 This repository provides an implementation of the Trans‑Dimensional Bradley‑Terry (TDBT) model for ranking estimation. It extends the classic Bradley‑Terry framework to allow multi‑dimensional latent “worth” scores and automatic selection of the appropriate dimensionality. Efficient Gibbs sampling is achieved via Polya‑Gamma data augmentation, enabling accurate ranking from pairwise comparison data.
