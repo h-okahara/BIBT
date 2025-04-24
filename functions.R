@@ -124,8 +124,6 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K)
     })
     
     for (s in 2:K) {
-      # V[s] <- rgamma(n = 1, shape = alphas[s], rate = betas[s])
-      # V[s] <- V[s] + 1
       V[s] <- rtrunc(n = 1, spec = "gamma", a = 1, b = Inf, shape = alphas[s], rate = betas[s]) # Sampling from the trunc. Gamma distribution
     }
     tau <- cumprod(V)
