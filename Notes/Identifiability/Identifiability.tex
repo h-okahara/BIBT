@@ -1,0 +1,169 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[truedimen,margin=30mm]{geometry} 
+
+%
+
+%=usepackage================================================
+\usepackage{epsfig,hyperref,url}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amsthm}
+\usepackage{amssymb}
+\usepackage{ascmac}
+\usepackage{booktabs}
+\usepackage{color}
+\usepackage{graphicx}
+\usepackage{bm}
+\usepackage{multirow}
+\usepackage{setspace}
+\usepackage{natbib}
+\usepackage{mathtools}
+\mathtoolsset{showonlyrefs}
+\usepackage{color}
+\usepackage{csquotes}
+\usepackage{enumitem}
+\setlist[enumerate]{wide=0pt, leftmargin=15pt, labelwidth=15pt, align=left}
+\usepackage{mathrsfs}
+\usepackage{comment}
+\usepackage{times}
+\usepackage{here}
+\usepackage{listings}
+\lstset{
+  basicstyle={\ttfamily},%
+  identifierstyle={\small},%
+  commentstyle={\smallitshape},%
+  keywordstyle={\small\bfseries},%
+  ndkeywordstyle={\small},%
+  stringstyle={\small\ttfamily},%
+  frame={tb},%
+  breaklines=true,%
+  columns=[l]{fullflexible},%
+  numbers=left,%
+  xrightmargin=0zw,%
+  xleftmargin=2zw,%
+  numberstyle={\scriptsize},%
+  stepnumber=1,%
+  numbersep=1zw,%
+  lineskip=-0.5ex,%
+  backgroundcolor={\color[gray]{0.95}},%
+}
+
+
+%
+\usepackage{titlesec}
+\titleformat*{\section}{\large\bfseries}
+\titleformat*{\subsection}{\it}
+
+
+%
+\newtheorem{df}{Definition}
+\newtheorem{thm}{Theorem}
+\newtheorem{lem}{Lemma}
+\newtheorem{cor}{Corollary}
+\newtheorem{prp}{Proposition}
+\newtheorem{exm}{Example}
+\newtheorem{algo}{Algorithm}
+\newtheorem{as}{Assumption}
+%
+
+
+
+
+%----------------------------------------%
+%             Definition                 %
+%----------------------------------------%
+
+\def\ep{{\varepsilon}}
+\def\Si{{\Sigma}}
+\def\Ga{\Gamma}
+
+\def\tht{{\widetilde{\theta}}}
+\def\thh{{\widehat{\theta}}}
+
+
+
+%----------------------------------------%
+%           Title page                   %
+%----------------------------------------%
+\title{{\bf Identifiability of the Trans-dimensional Bradley-Terry Model}\footnote{\today}}
+\author{\empty}
+\date{\empty}
+
+
+\begin{document}
+
+\maketitle
+\doublespacing
+
+
+
+%----------------------------------------%
+%            Introduction                %
+%----------------------------------------%
+\section{Identification of the Likelihood}
+Consider the sampling distribution for a response $\pi$ in a trans-dimensional Bradley-Terry (TDBT) model given by
+\begin{equation} \label{eq:model}
+  p(Y \mid w, F) = \prod_{i<j} \frac{\exp\{w^\top (f_i-f_j)\}}{1+\exp\{w^\top (f_i-f_j)\}}.
+\end{equation}
+where $Y = \{ y_{12}, \dots, y_{N-1, N} \}$, $w = (w_{1}, \dots, w_{N})^{\top}$ and $F = \{ f_{1}, \dots, f_{N} \}$.
+When $K=1$ and $w=1$, the model \eqref{eq:model} reduces to the conventional Bradley-Terry model \citep{bradley1952Rank}.
+The multiple unobservable parameters in the equation \eqref{eq:model} induce the problem of identification in the general data model $\prod_{i<j} \pi_{ij}$.
+
+Identification can be dealt with by specifying additional assumptions and constraints that render the model estimable.
+In general, we say that a statistical model is identifiable if distinct parameter values generate different joint probability distributions.
+The likelihood of a TDBT model can be underidentified for the following five reasons: location invariance, scale invariance, reflective invariance, label switching, and rotation invariance.
+
+
+ 
+\section*{Location and Scale Invariance}
+For illustration, consider the TDBT model with the linear predictor $z_{ij} = w (f_{i} - f_{j})$.
+If we add a constant vector $\delta = (\delta_{1}, \dots, \delta_{K})^{\top}$ to both $f_{i}$ and $f_{j}$, the likelihood still remains the same.
+In addition, if we divide $w$ by a constant vector $c = (c_{1}, \dots, c_{K})^{\top}$ ($c_{k} \in \mathbb{R} \backslash \{0\}$) and multiply both $f_{i}$ and $f_{j}$ by the same constant, the likelihood remains unchanged:
+\begin{equation}
+    p(Y \mid w, F) = p \Bigl(Y \mid \tilde w, \tilde F \Bigr)
+\end{equation}
+where $\tilde w = \bigl(\tfrac{w_1}{c_1}, \dots, \tfrac{w_K}{c_K} \bigr)^{\top}$, $\tilde F = \{ \tilde f_{1}, \dots, \tilde f_{N} \}$ and $\tilde f_{n} = (c_{1} (f_{n1} + \delta_{1}), \dots, c_{K} (f_{nK} + \delta_{K}))^{\top}$ for $n=1,\dots,N$; $k=1,\dots,K$.
+To address this issue, one method is to assign a very strong prior to $f_{i}$ \citep[e.g.,][]{bafumi2005Practical}, a fixed population distribution that can determine the location and scale of the parameter space for the entire likelihood function $p(Y \mid w,F)$.
+The constraint is simply
+\begin{equation}
+    f_{i} \sim \mathcal{N}_{K} (\mathbf{0}, \boldsymbol{I}) \quad \text{for} \ i= 1, 2, \dots, N.
+\end{equation}
+
+
+
+
+
+\section*{Reflective Invariance}
+Even after eliminating additive and multiplicative aliasing, the likelihood of the TDBT model remains invariant when every element of the $k$-th dimension is multiplied by $-1$ simultaneously in the weight vector $w$ and in all worth vectors $f_{i}$, so there exists $2^{K}$ equivalent parameterizations.
+A common remedy to remove this ambiguity is to impose a sign-identification rule, for example, to restrict the support of $w$ to the positive orthant as follows:
+\begin{equation}
+    w_{k}>0 \quad\text{for}\;k=1,\dots,K.
+\end{equation}
+either by imposing $w$ a truncated prior or by re-parameterising $w$ (e.g., $\log w_{k} \in \mathbb{R}$).
+Since the sign of each element of $w$ can no longer change, the sign of $f_{i}$ is identifiable and still capture both positive and negative latent traits. 
+Therefore, this positivity constraint resolves reflective invariance without affecting model flexibility.
+
+
+
+
+\section*{Label Switching}
+In multidimensional setting, another issue arises.
+For $K$ dimensions, there are $K!$ permutations of parameter labels that yield the same likelihood. 
+Combined with sign reversals, the likelihood has $2^{K} \times K!$ symmetric modes.
+
+
+
+
+\section*{Rotation Invariance}
+
+
+
+
+
+%   Reference
+\bibliographystyle{chicago}
+\bibliography{2025_TDBT}
+
+
+
+\end{document}
