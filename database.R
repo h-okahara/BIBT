@@ -170,11 +170,11 @@ database$sumo$y_ij <- database$sumo$win1
 ###---------------------------------------###
 
 # Generate artificial data for 4 entities
-w.true <- c(3.4, 2.4, 1.4)
-F.true <- matrix(c( 
-  0.11, -0.27, 0.05, 0.13,
-  0.14, -0.43, 0.06, 0.19,
-  0.09, -0.21, 0.04, 0.10 
+w.true <- c(0.9, 1.2, 1.1)
+F.true <- matrix(c(
+  0.24, -0.65, 0.08, 0.34,
+  0.13, -0.37, 0.06, 0.18,
+  0.05, -0.15, 0.02, 0.07 
 ), nrow=3, byrow = TRUE)
 
 # Name the rows and columns
@@ -198,7 +198,7 @@ F.true <- matrix(c(
 ), nrow = 3, byrow = TRUE)
 
 # Name the rows and columns
-database$artificial.6 <- Create.Artificial.Data(num.freq = 500, w0 = w.true, F0 = F.true)
+database$artificial.6 <- Create.Artificial.Data(num.freq = 800, w0 = w.true, F0 = F.true)
 rownames(database$artificial.6) <- 
   colnames(database$artificial.6) <- database$name.6
 

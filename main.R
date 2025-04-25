@@ -9,10 +9,10 @@ source("simulation.R")
 source("database.R", local = TRUE)
 
 # preparation
-X <- database$artificial.6
-entities.names <- database$name.6
+X <- database$artificial.4
+entities.names <- database$name.4
 N <- length(entities.names)
-dimensionality <- 6
+dimensionality <- 4
 num.iter <- 10000
 num.burn <- num.iter/5
 alpha <- 3
@@ -45,13 +45,13 @@ plot(citations.qv, levelNames = entities.names)
 ###########################  BEGIN TDBT.Gibbs  #################################
 
 num.chains <- 1
-name <- "w"   # Options: (omega, w, F.worths, V, worths)
+name <- "F.worths"   # Options: (w, F.worths, V, worths)
 mcmc.results <- run.MCMCs(num.chains = num.chains, name = name, MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
                           X, K = dimensionality, mcmc = num.iter, burn = num.burn, 
                           w0.prior = rep(1, dimensionality), # seq(dimensionality, 1, -1),
                           S0.prior = diag(1, dimensionality), 
                           F.prior = matrix(1, nrow = dimensionality, ncol = N), 
-                          V.prior = rep(3, dimensionality), alpha = alpha)
+                          V.prior = rep(2, dimensionality), alpha = alpha)
 
 ## Extract MCMC sample for specified parameter (name)
 specific.mcmc <- mcmc.extract(mcmc.results$all.mcmc, name, rhat = FALSE, ess = FALSE)
@@ -66,5 +66,9 @@ compute.CIs(num.chains, specific.mcmc, name, level = 0.95, decimal = 3, hpd = TR
 ## Compare each MCMC chain
 plot.worths(num.chains, mcmc.results$all.mcmc, names = entities.names, partition = FALSE, order = "desc", level = 0.95)
 stats.worths(num.chains, mcmc.results$all.mcmc, names = entities.names, partition = TRUE, order = "desc", decimal = 4)
+
+# Label-switching diagnosis
+diag_ls <- check.label_switching(specific.mcmc[[1]])
+diag_ls$switch_rate
 
 ############################  END TDBT.Gibbs  ##################################
