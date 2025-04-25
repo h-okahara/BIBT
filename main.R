@@ -5,7 +5,6 @@
 
 source("libraries.R")
 source("functions.R")
-source("simulation.R")
 source("database.R", local = TRUE)
 
 # preparation
