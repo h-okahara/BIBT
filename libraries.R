@@ -6,6 +6,7 @@
 library(BradleyTerry2)
 library(PLMIX)
 library(PlackettLuce)
+library(label.switching)
 
 library(BayesLogit)
 library(MASS)

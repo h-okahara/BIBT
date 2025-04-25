@@ -32,7 +32,7 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K)
   S0.inv <- solve(S0)
   F.worths <- F.prior
   V <- V.prior
-  V[1] <- 2
+  V[1] <- 1
   tau <- cumprod(V)
   alphas <- alphas0 <- rep(alpha, K)
   betas <- betas0 <- rep(1, K)
@@ -42,7 +42,6 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K)
   omega <- rep(NA, num.pairs)
 
   # vectors/matrices to store posterior samples
-  omega.pos <- matrix(0, nrow = mcmc, ncol = num.pairs)
   w.pos <- matrix(0, nrow = mcmc, ncol = K)
   F.pos <- array(0, dim = c(mcmc, K, N))
   V.pos <- matrix(0, nrow = mcmc, ncol = K)
@@ -50,6 +49,7 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K)
   
   #=======================   BEGIN MCMC sampling   =============================
   for (iter in 1:mcmc) {
+    # -----------------------  BEGIN updating  ---------------------------------
     ## updating omega
     for (p in 1:num.pairs) {
       omega[p] <- rpg(n = 1, h = X$n_ij[p], z = sum(w * Phi[p, ]))  # sample omega[p] from Polya-Gamma distribution
@@ -66,11 +66,6 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K)
     B.omega <- t(Phi) %*% kappa + S0.inv %*% w0
     w.mean <- as.vector(A.omega %*% B.omega)
     w.Sigma <- A.omega
-    
-    idx <- order(w.mean, decreasing = TRUE)  # Sort w in descending order 
-    w.mean <- w.mean[idx]                    # for solving label-switching problem
-    w.mean <- w.mean - rep(min(w.mean)-1, K)
-    w.Sigma <- w.Sigma[idx, idx]
     w <- mvrnorm(1, mu = w.mean, Sigma = w.Sigma)
     
     ## updating f_i for i = 1,...,N
@@ -105,11 +100,6 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K)
       B_f <- eta_i[i] * w
       f_i.mean <- as.vector(A_f %*% B_f)
       f_i.Sigma <- A_f
-      
-      idx <- order(diag(A_f), decreasing = TRUE)  # Sort w in descending order 
-      f_i.mean <- f_i.mean[idx]                   # for solving label-switching problem
-      f_i.mean <- f_i.mean - rep(f_i.mean[K], K)
-      f_i.Sigma <- f_i.Sigma[idx, idx]
       F.worths[ ,i] <- mvrnorm(1, mu = f_i.mean, Sigma = f_i.Sigma)
     }
     
@@ -127,26 +117,51 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K)
       V[s] <- rtrunc(n = 1, spec = "gamma", a = 1, b = Inf, shape = alphas[s], rate = betas[s]) # Sampling from the trunc. Gamma distribution
     }
     tau <- cumprod(V)
+    # ------------------------  END updating  ----------------------------------
+    
+    # ---------------------  BEGIN Normalization  ------------------------------
+    # Set w to be positive
+    neg.idx <- which(w < 0)
+    if(length(neg.idx)) {
+      w[neg.idx] <- -w[neg.idx]
+      F.worths[neg.idx,  ] <- -F.worths[neg.idx, , drop = FALSE]
+    }
+    
+    # Remove location indeterminacy
+    # worths <- drop(w %*% F.worths)
+    # shift  <- (mean(worths) / sum(w^2)) * w
+    # F.worths <- sweep(F.worths, 2, shift, "-")
+    
+    # Remove scale indeterminacy
+    # w.scale <- mean(w)
+    # w  <- w / w.scale
+    # F.worths  <- F.worths * w.scale
+    # ---------------------  END Normalization  --------------------------------
     
     # store posterior samples
-    omega.pos[iter, ] <- omega
     w.pos[iter, ] <- w
     F.pos[iter, , ] <- F.worths
     V.pos[iter, ] <- V
-    worths.pos[iter, ] <- w %*% F.worths[,1:N]
+    # worths.pos[iter, ] <- w %*% F.worths[,1:N]
   }
   #=======================   END MCMC sampling   ===============================
-
+  
   # summary
   om <- 1:burn
-  omega.pos <- omega.pos[-om, ]
   w.pos <- w.pos[-om, ]
   F.pos <- F.pos[-om, , ]
   V.pos <- V.pos[-om, ]
-  worths.pos <- worths.pos[-om, ]
-  worths.pos <- worths.pos - apply(worths.pos, 2, mean)[N] # parallel translation
+  # worths.pos <- worths.pos[-om, ]
+  # worths.pos <- worths.pos - apply(worths.pos, 2, mean)[N] # parallel translation
   
-  result <- list(omega = omega.pos, w = w.pos, F.worths = F.pos, V = V.pos, worths = worths.pos)
+  # Reorder w in descending order
+  for(iter in 1:(mcmc-burn)) {
+    ord <- order(w.pos[iter, ], decreasing = TRUE)
+    w.pos[iter, ]  <- w.pos[iter, ord]
+    F.pos[iter, , ] <- F.pos[iter, ord, ]
+  }
+  
+  result <- list(w = w.pos, F.worths = F.pos, V = V.pos)# , worths = worths.pos)
   return(result)
 }
 
@@ -857,76 +872,42 @@ mcmc.extract <- function(chains, name, rhat = TRUE, ess = TRUE) {
 
 
 
-###---------------------------------###
-###        Orthogonalization        ###
-###---------------------------------###
+###-------------------------------------###
+###        Check Label-Switching        ###
+###-------------------------------------###
 
-## INPUT:
-# X:  A matrix whose columns represent the vectors to be orthogonalized.
-
-## OUTPUT:
-# Returns a matrix whose columns form an orthogonal set.
-# Not used function
-orthogonalization <- function(F.worths) {
-  N <- ncol(F.worths)
-  K <- nrow(F.worths)
-  O.base <- matrix(0, nrow = K, ncol = N)
-  O.base[1,] <- F.worths[1,]
+check.label_switching <- function(mcmc.chains, order_fun = function(x) order(x, decreasing = TRUE), plot = TRUE) {
+  mcmc  <- nrow(mcmc.chains)
+  N <- ncol(mcmc.chains)
   
-  for (k in 2:K) {
-    f_k <- F.worths[k,]
-    numer <- rowSums(O.base[1:(k-1),] * matrix(c(rep(f_k, k-1)), nrow = k-1, byrow = TRUE))
-    if (k>2) {
-      denom <- rowSums(O.base[1:(k-1), ]^2) 
-      f_k <- f_k - colSums(O.base[1:(k-1), ] * matrix(rep(numer/denom, each = N), nrow = k-1, byrow = FALSE))
-    } else {
-      denom <- sum(O.base[1, ]^2)
-      f_k <- f_k - O.base[1:(k-1),] * (numer/denom)
-    }
-    O.base[k,] <- f_k
+  # Set up the plotting area
+  par(mfrow = c(1, N), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
+  
+  # 1) permutation matrix (mcmc × N)
+  perm_mat <- t(apply(mcmc.chains, 1, order_fun))
+  
+  # 2) how often the permutation changes
+  change_vec   <- rowSums(perm_mat[-1, ] != perm_mat[-mcmc, ])
+  switch_rate  <- mean(change_vec > 0)
+  
+  if(plot) {
+    ## (a) トレースプロット
+    matplot(mcmc.chains, type = "l", lty = 1, col = rainbow(N),
+            xlab = "iteration", ylab = "w", main = "Trace of w-components")
+    legend("topleft", legend = paste0("dim", 1:K), col = rainbow(K), lty = 1, cex = .6)
+    
+    ## (b) permutation heat-map
+    image(t(perm_mat), axes = FALSE, col = rainbow(N),
+          main = "permutation matrix (rows = iteration)")
+    axis(2, at = seq(0,1,length.out=N), labels = paste0("pos", 1:N), las = 2)
   }
-  return(O.base)
-}
-
-
-
-
-###-------------------------------------------------###
-###        Plot Truncated Gamma distribution        ###
-###-------------------------------------------------###
-
-## Plot truncated Gamma distribution
-plot.truncGamma <- function(shape = 1, rate = 1, lower.bound = 1, upper.bound = 100){
-  x_values <- seq(lower.bound, upper.bound, length.out = 500)
-  y_values_truncdist <- dtrunc(x_values, 
-                               spec = "gamma", 
-                               a = lower.bound, 
-                               b = upper.bound, 
-                               shape = shape, 
-                               rate = rate)
-  plot_data_truncdist <- data.frame(x = x_values, y = y_values_truncdist)
   
-  ggplot(plot_data_truncdist, aes(x = x, y = y)) +
-    geom_line(color = "darkgreen", linewidth = 1) +
-    geom_vline(xintercept = c(lower.bound, upper.bound), color = "red", linetype = "dashed") +
-    labs(
-      title = "Truncated Gamma Distribution (truncdist with ggplot2)",
-      subtitle = paste("shape =", shape, ", rate =", rate, ", range = [", lower.bound, ",", upper.bound, "]"),
-      x = "x",
-      y = "Density"
-    ) +
-    theme_minimal() 
+  out <- list(perm_mat = perm_mat,
+              change_vec = change_vec,
+              switch_rate = switch_rate)
+  class(out) <- "labelSwitchDiag"
+  return(out)
 }
-
-
-#gamma <- tryCatch({
-#  rtrunc(n = 1, spec = "gamma", a = 1, b = Inf, shape = 9, rate = 50)
-#}, error = function(e) {
-#  message("Error in sampling V[s] from truncated gamma distribution: ", e$message)
-#  return(1)
-#})
-#print(gamma)
-
 
 
 
