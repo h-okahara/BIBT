@@ -15,9 +15,11 @@
 ## OUTPUT:
 # A matrix of MCMC samples for the parameters: omega, w, F, V.
 
-TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K), 
-                       S0.prior = diag(1, K), F.prior, V.prior = rep(1, K), alpha = 3) {
-  # preparation
+TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, 
+                       w0.prior = seq(3, 1, -1), S0.prior = diag(1, 3), 
+                       F.prior = matrix(0, nrow = 3, ncol = N), 
+                       V.prior = rep(1, 3), alpha = 3) {
+  ## Preparation
   entity.name <- unique(c(X[ ,1], X[ ,2]))
   N <- length(entity.name)       # number of entities
   entity.index <- setNames(1:N, entity.name)
@@ -26,7 +28,7 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K)
   num.pairs <- nrow(pairs)    # number of unique (i, j) pairs
   if(num.pairs!=nrow(X)){stop("Number of pairs is not equal to the length of X")}
   
-  # initial values
+  ## Initial values
   w0 <- w <- w0.prior
   S0 <- S0.prior
   S0.inv <- solve(S0)
@@ -41,7 +43,7 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K)
   Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
   omega <- rep(NA, num.pairs)
 
-  # vectors/matrices to store posterior samples
+  ## Vectors/matrices to store posterior samples
   w.pos <- matrix(0, nrow = mcmc, ncol = K)
   F.pos <- array(0, dim = c(mcmc, K, N))
   V.pos <- matrix(0, nrow = mcmc, ncol = K)
@@ -49,13 +51,13 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K)
   
   #=======================   BEGIN MCMC sampling   =============================
   for (iter in 1:mcmc) {
-    # -----------------------  BEGIN updating  ---------------------------------
-    ## updating omega
+    # -----------------------  BEGIN Updating  ---------------------------------
+    ## Updating omega
     for (p in 1:num.pairs) {
       omega[p] <- rpg(n = 1, h = X$n_ij[p], z = sum(w * Phi[p, ]))  # sample omega[p] from Polya-Gamma distribution
     }
     
-    ## updating w
+    ## Updating w
     inv.part <- tryCatch({
       solve(diag(1/omega) + Phi %*% S0 %*% t(Phi))
       }, error = function(e) {
@@ -68,7 +70,7 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K)
     w.Sigma <- A.omega
     w <- mvrnorm(1, mu = w.mean, Sigma = w.Sigma)
     
-    ## updating f_i for i = 1,...,N
+    ## Updating f_i for i = 1,...,N
     omega_i <- numeric(N)
     eta_i <- numeric(N)
     
@@ -103,10 +105,10 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K)
       F.worths[ ,i] <- mvrnorm(1, mu = f_i.mean, Sigma = f_i.Sigma)
     }
     
-    ## updating Phi
+    ## Updating Phi
     Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
     
-    ## updating v_s and tau_s for s = 2,...,K
+    ## Updating v_s and tau_s for s = 2,...,K
     alphas[2:K] <- alphas0[2:K] + (N/2) * (K-(2:K)+1)
     sq.F_k <- rowSums(F.worths^2)
     betas[2:K] <- sapply(2:K, function(s) {
@@ -117,51 +119,53 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K)
       V[s] <- rtrunc(n = 1, spec = "gamma", a = 1, b = Inf, shape = alphas[s], rate = betas[s]) # Sampling from the trunc. Gamma distribution
     }
     tau <- cumprod(V)
-    # ------------------------  END updating  ----------------------------------
+    # ------------------------  END Updating  ----------------------------------
     
     # ---------------------  BEGIN Normalization  ------------------------------
-    # Set w to be positive
+    ## Set w to be positive
     neg.idx <- which(w < 0)
     if(length(neg.idx)) {
       w[neg.idx] <- -w[neg.idx]
       F.worths[neg.idx,  ] <- -F.worths[neg.idx, , drop = FALSE]
     }
     
-    # Remove location indeterminacy
+    ## Remove location indeterminacy
+    # Here, either impose the sum-to-zero constraint, 
+    # or impose endpoint constraints at line 159
     # worths <- drop(w %*% F.worths)
     # shift  <- (mean(worths) / sum(w^2)) * w
     # F.worths <- sweep(F.worths, 2, shift, "-")
     
-    # Remove scale indeterminacy
+    ## Remove scale indeterminacy
     # w.scale <- mean(w)
     # w  <- w / w.scale
     # F.worths  <- F.worths * w.scale
     # ---------------------  END Normalization  --------------------------------
     
-    # store posterior samples
+    ## Store posterior samples
     w.pos[iter, ] <- w
     F.pos[iter, , ] <- F.worths
     V.pos[iter, ] <- V
-    # worths.pos[iter, ] <- w %*% F.worths[,1:N]
+    worths.pos[iter, ] <- w %*% F.worths[,1:N]
   }
   #=======================   END MCMC sampling   ===============================
   
-  # summary
+  ## Summary
   om <- 1:burn
   w.pos <- w.pos[-om, ]
   F.pos <- F.pos[-om, , ]
   V.pos <- V.pos[-om, ]
-  # worths.pos <- worths.pos[-om, ]
-  # worths.pos <- worths.pos - apply(worths.pos, 2, mean)[N] # parallel translation
+  worths.pos <- worths.pos[-om, ]
+  worths.pos <- worths.pos - apply(worths.pos, 2, mean)[N] # parallel translation
   
-  # Reorder w in descending order
+  ## Reorder w in descending order
   for(iter in 1:(mcmc-burn)) {
     ord <- order(w.pos[iter, ], decreasing = TRUE)
     w.pos[iter, ]  <- w.pos[iter, ord]
     F.pos[iter, , ] <- F.pos[iter, ord, ]
   }
   
-  result <- list(w = w.pos, F.worths = F.pos, V = V.pos)# , worths = worths.pos)
+  result <- list(w = w.pos, F.worths = F.pos, V = V.pos, worths = worths.pos)
   return(result)
 }
 
@@ -189,13 +193,14 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K)
 ## OUTPUT:
 # A list of MCMC draws from multiple chains.
 
-run.MCMCs <- function(num.chains = 1, name, MCMC.plot = TRUE, rhat = TRUE, ess = TRUE,
-                      X, K = 3, mcmc = 10000, burn = 2000, w0.prior = rep(1, K), 
-                      S0.prior = diag(1, K), F.prior, V.prior = rep(1, K), alpha = 2) {
+run.MCMCs <- function(num.chains = 1, name, MCMC.plot = TRUE, rhat = FALSE, ess = FALSE,
+                      X, K = 3, mcmc = 10000, burn = 2000, 
+                      w0.prior = rep(1, 3), S0.prior = diag(1, 3), 
+                      F.prior = matrix(0, nrow = 3, ncol = 4), 
+                      V.prior = rep(1, 3), alpha = 2) {
   start.time <- Sys.time()
-  # if(K==1){stop("Dimensionality must be K > 1")}
   
-  # Run multiple MCMC chains
+  ## Run multiple MCMC chains
   if (K > 1) {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(73 + chain.id)
@@ -205,13 +210,16 @@ run.MCMCs <- function(num.chains = 1, name, MCMC.plot = TRUE, rhat = TRUE, ess =
     }, mc.cores = min(num.chains, parallel::detectCores()-1)) 
   } else {
     stop("Dimensionality must be K > 1")
+    #
+    # Here, I plan to improve this part
+    # so that a standard Bradley-Terry model can be run.
+    # 
   }
   
-  
-  # Extract samples of specific parameter (name) from chains
+  ## Extract samples of specific parameter (name) from chains
   mcmc.chains <- mcmc.extract(chains, name, rhat = rhat, ess = ess)
   
-  # plot MCMC sample paths
+  ## Plot MCMC sample paths
   if (MCMC.plot) {
     plot.MCMCs(num.chains, mcmc.chains, name)
   }
@@ -237,44 +245,44 @@ run.MCMCs <- function(num.chains = 1, name, MCMC.plot = TRUE, rhat = TRUE, ess =
 
 plot.MCMCs <- function(num.chains = 1, mcmc.chains, name) {
   if (name != "F.worths") {
-    num.iter <- nrow(mcmc.chains[[1]])
-    num.dim <- ncol(mcmc.chains[[1]])
+    mcmc <- nrow(mcmc.chains[[1]])
+    K <- ncol(mcmc.chains[[1]])
     
-    # Set up the plotting area
-    par(mfrow = c(1, num.dim), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
+    ## Set up the plotting area
+    par(mfrow = c(1, K), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
     
-    # Loop over each dimension to plot MCMC paths
-    for (k in 1:num.dim) {
-      plot(1:num.iter, mcmc.chains[[1]][, k], type = "l", col = 1,
+    ## Loop over each dimension to plot MCMC paths
+    for (k in 1:K) {
+      plot(1:mcmc, mcmc.chains[[1]][, k], type = "l", col = 1,
            xlab = "Iteration", ylab = "", main = paste0(name, "_", k))
       
       # Overlay traces for remaining chains
       if (num.chains > 1) {
         for (i in 2:num.chains) {
-          lines(1:num.iter, mcmc.chains[[i]][, k], col = i)
+          lines(1:mcmc, mcmc.chains[[i]][, k], col = i)
         }
       }
     }
     mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
     
   } else {
-    num.iter <- dim(mcmc.chains[[1]])[1]
-    num.dim <- dim(mcmc.chains[[1]])[2]
-    num.entities <- dim(mcmc.chains[[1]])[3]
+    mcmc <- dim(mcmc.chains[[1]])[1]
+    K <- dim(mcmc.chains[[1]])[2]
+    N <- dim(mcmc.chains[[1]])[3]
     
-    # Set up the plotting area
-    par(mfrow = c(num.entities, num.dim), mar = c(2, 2, 2, 1), oma = c(1, 1, 2, 1))
+    ## Set up the plotting area
+    par(mfrow = c(N, K), mar = c(2, 2, 2, 1), oma = c(1, 1, 2, 1))
     
-    # Loop over each dimension to plot MCMC paths
-    for (e in 1:num.entities) {
-      for (k in 1:num.dim) {
-        plot(1:num.iter, mcmc.chains[[1]][, k, e], type = "l", col = 1,
+    ## Loop over each dimension to plot MCMC paths
+    for (e in 1:N) {
+      for (k in 1:K) {
+        plot(1:mcmc, mcmc.chains[[1]][, k, e], type = "l", col = 1,
              xlab = "Iteration", ylab = "", main = paste0(name, "_", e, k))
         
         # Overlay traces for remaining chains
         if (num.chains > 1) {
           for (i in 2:num.chains) {
-            lines(1:num.iter, mcmc.chains[[i]][, k, e], col = i)
+            lines(1:mcmc, mcmc.chains[[i]][, k, e], col = i)
           }
         }
       }
@@ -301,16 +309,16 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains, name) {
 
 plot.posteriors <- function(num.chains = 1, mcmc.chains, name, bins = 30) {
   if (name == "F.worths") {
-    num.iter    <- dim(mcmc.chains[[1]])[1]
-    num.dim     <- dim(mcmc.chains[[1]])[2]
-    num.entities<- dim(mcmc.chains[[1]])[3]
+    mcmc <- dim(mcmc.chains[[1]])[1]
+    K <- dim(mcmc.chains[[1]])[2]
+    N <- dim(mcmc.chains[[1]])[3]
     
-    # Set up the plotting area
-    par(mfrow = c(num.entities, num.dim), mar = c(2, 2, 2, 1), oma = c(1, 1, 2, 1))
+    ## Set up the plotting area
+    par(mfrow = c(N, K), mar = c(2, 2, 2, 1), oma = c(1, 1, 2, 1))
     
-    # Loop over each entity and each dimension to plot histograms
-    for (e in 1:num.entities) {
-      for (k in 1:num.dim) {
+    ## Loop over each entity and each dimension to plot histograms
+    for (e in 1:N) {
+      for (k in 1:K) {
         hist(mcmc.chains[[1]][, k, e], breaks = bins, col = "skyblue", border = "white", probability = TRUE,
              xlab = name, main = paste(name, "_", e, k, sep = ""))
         
@@ -327,14 +335,14 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, bins = 30) {
     mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
     
   } else if (name == "V") {
-    num.iter <- nrow(mcmc.chains[[1]])
-    num.dim  <- ncol(mcmc.chains[[1]])
+    mcmc <- nrow(mcmc.chains[[1]])
+    K  <- ncol(mcmc.chains[[1]])
     
-    # Set up the plotting area
-    par(mfrow = c(1, num.dim-1), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
+    ## Set up the plotting area
+    par(mfrow = c(1, K-1), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
     
-    # Loop over each parameter to plot histogram with density curve
-    for (s in 2:num.dim) {
+    ## Loop over each parameter to plot histogram with density curve
+    for (s in 2:K) {
       hist(mcmc.chains[[1]][, s], breaks = bins, col = "skyblue", border = "white", probability = TRUE,
            xlab = name, main = paste("v_", s, sep = ""))
       
@@ -350,14 +358,14 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, bins = 30) {
     mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
     
   } else {
-    num.iter <- nrow(mcmc.chains[[1]])
-    num.dim  <- ncol(mcmc.chains[[1]])
+    mcmc <- nrow(mcmc.chains[[1]])
+    K  <- ncol(mcmc.chains[[1]])
     
-    # Set up the plotting area
-    par(mfrow = c(1, num.dim), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
+    ## Set up the plotting area
+    par(mfrow = c(1, K), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
     
-    # Loop over each parameter to plot histogram with density curve
-    for (k in 1:num.dim) {
+    ## Loop over each parameter to plot histogram with density curve
+    for (k in 1:K) {
       hist(mcmc.chains[[1]][, k], breaks = bins, col = "skyblue", border = "white", probability = TRUE,
            xlab = name, main = paste(name, "_", k, sep = ""))
       
@@ -389,19 +397,19 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, bins = 30) {
 ## OUTPUT:
 # For each chain, prints a data frame of posterior statistics (mean and median) for each parameter.
 
-stats.posteriors <- function(num.chains = 1, mcmc.chains, name, decimal = 4) {
-  if (name == "F.worths") {
+stats.posteriors <- function(num.chains = 1, mcmc.chains, param.name, entities.name, decimal = 4) {
+  if (param.name == "F.worths") {
     for (chain in 1:num.chains) {
       cat("Chain", chain, "\n")
-      num.iter <- dim(mcmc.chains[[chain]])[1]
-      num.dim  <- dim(mcmc.chains[[chain]])[2]
-      num.entities <- dim(mcmc.chains[[chain]])[3]
+      mcmc <- dim(mcmc.chains[[chain]])[1]
+      K  <- dim(mcmc.chains[[chain]])[2]
+      N <- dim(mcmc.chains[[chain]])[3]
       
-      # Compute the mean and median
-      for (e in 1:num.entities) {
+      ## Compute the mean and median
+      for (e in 1:N) {
         means <- apply(mcmc.chains[[chain]][, , e], 2, mean)
         medians <- apply(mcmc.chains[[chain]][, , e], 2, median)
-        stats <- data.frame(Variable = paste0("f_", e, 1:num.dim),
+        stats <- data.frame(Variable = paste0("f_", e, 1:K),
                             Mean = round(means, decimal),
                             Median = round(medians, decimal))
         print(stats, row.names = FALSE)
@@ -412,13 +420,13 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, decimal = 4) {
   } else {
     for (chain in 1:num.chains) {
       cat("Chain", chain, "\n")
-      num.iter <- nrow(mcmc.chains[[chain]])
-      num.dim  <- ncol(mcmc.chains[[chain]])
+      mcmc <- nrow(mcmc.chains[[chain]])
+      K  <- ncol(mcmc.chains[[chain]])
       
-      # Compute the mean and median
+      ## Compute the mean and median
       means <- apply(mcmc.chains[[chain]], 2, mean)
       medians <- apply(mcmc.chains[[chain]], 2, median)
-      stats <- data.frame(Variable = paste0(name, "_", 1:num.dim),
+      stats <- data.frame(Variable = entities.name, # paste0(name, "_", 1:K),
                           Mean = round(means, decimal),
                           Median = round(medians, decimal))
       print(stats, row.names = FALSE)
@@ -450,14 +458,14 @@ compute.CIs <- function(num.chains = 1, mcmc.chains, name, level = 0.95, decimal
     cat("Credible Intervals for", name, ":\n")
     for (chain in 1:num.chains) {
       cat("Chain", chain, "\n")
-      num.iter <- dim(mcmc.chains[[chain]])[1]
-      num.dim  <- dim(mcmc.chains[[chain]])[2]
-      num.entities <- dim(mcmc.chains[[chain]])[3]
+      mcmc <- dim(mcmc.chains[[chain]])[1]
+      K  <- dim(mcmc.chains[[chain]])[2]
+      N <- dim(mcmc.chains[[chain]])[3]
       
-      # Compute credible intervals for each parameter
-      for (e in 1:num.entities) {
+      ## Compute credible intervals for each parameter
+      for (e in 1:N) {
         cat("f_", e, ":\n", sep = "")
-        for (k in 1:num.dim) {
+        for (k in 1:K) {
           if (hpd) {
             mcmc.obj <- as.mcmc(mcmc.chains[[chain]][, k, e])
             hpd.int <- coda::HPDinterval(mcmc.obj, prob = level)
@@ -478,11 +486,11 @@ compute.CIs <- function(num.chains = 1, mcmc.chains, name, level = 0.95, decimal
     cat("Credible Intervals for", name, ":\n")
     for (chain in 1:num.chains) {
       cat("Chain", chain, "\n")
-      num.iter <- nrow(mcmc.chains[[chain]])
-      num.dim  <- ncol(mcmc.chains[[chain]])
+      mcmc <- nrow(mcmc.chains[[chain]])
+      K  <- ncol(mcmc.chains[[chain]])
       
-      # Compute credible intervals for each parameter
-      for (s in 2:num.dim) {
+      ## Compute credible intervals for each parameter
+      for (s in 2:K) {
         if (hpd) {
           mcmc.obj <- as.mcmc(mcmc.chains[[chain]][, s])
           hpd.int <- coda::HPDinterval(mcmc.obj, prob = level)
@@ -501,11 +509,11 @@ compute.CIs <- function(num.chains = 1, mcmc.chains, name, level = 0.95, decimal
     cat("Credible Intervals for", name, ":\n")
     for (chain in 1:num.chains) {
       cat("Chain", chain, "\n")
-      num.iter <- nrow(mcmc.chains[[chain]])
-      num.dim  <- ncol(mcmc.chains[[chain]])
+      mcmc <- nrow(mcmc.chains[[chain]])
+      K  <- ncol(mcmc.chains[[chain]])
       
-      # Compute credible intervals for each parameter
-      for (k in 1:num.dim) {
+      ## Compute credible intervals for each parameter
+      for (k in 1:K) {
         if (hpd) {
           mcmc.obj <- as.mcmc(mcmc.chains[[chain]][, k])
           hpd.int <- coda::HPDinterval(mcmc.obj, prob = level)
@@ -539,16 +547,16 @@ compute.CIs <- function(num.chains = 1, mcmc.chains, name, level = 0.95, decimal
 
 plot.ACFs <- function(num.chains = 1, mcmc.chains, name) {
   if (name == "F.worths") {
-    num.iter    <- dim(mcmc.chains[[1]])[1]
-    num.dim     <- dim(mcmc.chains[[1]])[2]
-    num.entities<- dim(mcmc.chains[[1]])[3]
+    mcmc    <- dim(mcmc.chains[[1]])[1]
+    K     <- dim(mcmc.chains[[1]])[2]
+    N<- dim(mcmc.chains[[1]])[3]
     
-    # Set up the plotting area
-    par(mfrow = c(num.entities, num.dim), mar = c(2, 2, 4, 1), oma = c(2, 1, 2, 1))
+    ## Set up the plotting area
+    par(mfrow = c(N, K), mar = c(2, 2, 4, 1), oma = c(2, 1, 2, 1))
     
-    # Loop over each entity and each dimension
-    for (e in 1:num.entities) {
-      for (k in 1:num.dim) {
+    ## Loop over each entity and each dimension
+    for (e in 1:N) {
+      for (k in 1:K) {
         acf.base <- acf(mcmc.chains[[1]][, k, e], plot = FALSE)
         plot(acf.base, main = paste0("f_", e, k), col = 1)
         
@@ -563,14 +571,14 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name) {
     }
     mtext("ACF Plots for F", outer = TRUE, cex = 1.5)
   } else if (name == "V") {
-    num.iter <- nrow(mcmc.chains[[1]])
-    num.dim  <- ncol(mcmc.chains[[1]])
+    mcmc <- nrow(mcmc.chains[[1]])
+    K  <- ncol(mcmc.chains[[1]])
     
-    # Loop over each entity and each dimension
-    par(mfrow = c(1, num.dim-1), mar = c(2, 2, 4, 1), oma = c(2, 1, 2, 1))
+    ## Loop over each entity and each dimension
+    par(mfrow = c(1, K-1), mar = c(2, 2, 4, 1), oma = c(2, 1, 2, 1))
     
-    # Loop over each dimension
-    for (s in 2:num.dim) {
+    ## Loop over each dimension
+    for (s in 2:K) {
       acf.base <- acf(mcmc.chains[[1]][, s], plot = FALSE)
       plot(acf.base, main = paste0("v_", s), col = 1)
       
@@ -584,14 +592,14 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name) {
     }
     mtext("ACF Plots for v", outer = TRUE, cex = 1.5)
   } else {
-    num.iter <- nrow(mcmc.chains[[1]])
-    num.dim  <- ncol(mcmc.chains[[1]])
+    mcmc <- nrow(mcmc.chains[[1]])
+    K  <- ncol(mcmc.chains[[1]])
     
-    # Loop over each entity and each dimension
-    par(mfrow = c(1, num.dim), mar = c(2, 2, 4, 1), oma = c(2, 1, 2, 1))
+    ## Loop over each entity and each dimension
+    par(mfrow = c(1, K), mar = c(2, 2, 4, 1), oma = c(2, 1, 2, 1))
     
-    # Loop over each dimension
-    for (k in 1:num.dim) {
+    ## Loop over each dimension
+    for (k in 1:K) {
       acf.base <- acf(mcmc.chains[[1]][, k], plot = FALSE)
       plot(acf.base, main = paste0(name, "_", k), col = 1)
       
@@ -627,15 +635,16 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name) {
 
 plot.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE, 
                         order = NULL, level = 0.95) {
+  ## Preparation
   dims <- dim(chains[[1]]$F.worths)
   iter <- dims[1]
-  K     <- dims[2]
-  N     <- dims[3]
+  K <- dims[2]
+  N <- dims[3]
   if (is.null(names)) {
     names <- paste("Entity", 1:N)
   }
   
-  # Create a list to store data frames from each chain
+  ## Create a list to store data frames from each chain
   df.list <- list()
   if (partition) {
     for (chain in 1:num.chains) {
@@ -670,7 +679,7 @@ plot.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
   }
   data.all <- do.call(rbind, df.list)
   
-  # Get sorting entities in descending or ascending order.
+  ## Get sorting entities in descending or ascending order.
   if (order == "desc") {
     data.all$name <- fct_reorder(data.all$name, data.all$worth, .fun = mean, .desc = TRUE)
   } else if (order == 'asc') {
@@ -678,7 +687,7 @@ plot.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
   }
     
   
-  # if level is specified, trim data.
+  ## if level is specified, trim data.
   if (!is.null(level)) {
     lower_prob <- (1-level) / 2
     upper_prob <- 1-lower_prob
@@ -699,6 +708,7 @@ plot.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
     }
   }
   
+  ## Determine whether to draw plots separately for each MCMC chain
   if (partition) {
     plots <- ggplot(data.all, aes(x = name, y = worth, fill = chain)) +
       geom_violin(position = position_dodge(width = 0.8), alpha = 0.6, trim = FALSE) +
@@ -744,15 +754,16 @@ plot.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
 
 stats.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE, 
                          order = NULL, decimal = 4) {
+  ## Preparation
   dims <- dim(chains[[1]]$F.worths)
   iter <- dims[1]
-  K     <- dims[2]
-  N     <- dims[3]
+  K <- dims[2]
+  N <- dims[3]
   if (is.null(names)) {
     names <- paste("Entity", 1:N)
   }
   
-  # Create a list to store data frames from each chain
+  ## Create a list to store data frames from each chain
   means.list <- list()
   if (partition) {
     for (chain in 1:num.chains) {
@@ -760,7 +771,7 @@ stats.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
       chain.F.worths <- chains[[chain]]$F.worths
       out <- matrix(0, nrow = K, ncol = N)
       
-      # compute means for each entity and each dimension
+      # Compute means for each entity and each dimension
       for (k in 1:K) {
         chain.worths <- chain.w[, k] * chain.F.worths[, k, ]
         chain.worths <- chain.worths - mean(chain.worths[, N])
@@ -782,7 +793,7 @@ stats.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
     }
   }
   
-  # Get sorting entities in descending or ascending order.
+  ## Get sorting entities in descending or ascending order.
   for (chain in 1:num.chains) {
     sorting_index <- if (order == "desc") {
       order(means.list[[chain]][1, ], decreasing = TRUE)
@@ -793,7 +804,6 @@ stats.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
   }
   print(means.list)
 }
-
 
 
 
@@ -817,13 +827,13 @@ stats.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
 # Returns the extracted MCMC chains for the specified parameter.
 # Prints Rhat and ESS diagnostics for the specified parameter.
 
-mcmc.extract <- function(chains, name, rhat = TRUE, ess = TRUE) {
+mcmc.extract <- function(chains, name, rhat = FALSE, ess = FALSE) {
   mcmc.chains <- lapply(chains, function(chain) chain[[name]])
   if (name == "F.worths") {
     N <- dim(mcmc.chains[[1]])[3]
     mcmc.objs <- vector("list", N)
     
-    # Compute Gelman-Rubin diagnostic (Rhat) and Effective Sample Size (ESS)
+    ## Compute Gelman-Rubin diagnostic (Rhat) and Effective Sample Size (ESS)
     if (rhat || ess) {
       for (i in 1:N) {
         cat("f_", i, "\n", sep = "")
@@ -843,7 +853,7 @@ mcmc.extract <- function(chains, name, rhat = TRUE, ess = TRUE) {
     mcmc.objs <- mcmc.list(mcmc.obj)
     mcmc.objs <- mcmc.objs[, 2:3, ]
     
-    # Compute Gelman-Rubin diagnostic (Rhat) and Effective Sample Size (ESS)
+    ## Compute Rhat and ESS
     if (rhat) {
       rhat_vals <- gelman.diag(mcmc.objs, autoburnin = FALSE)$psrf[, 1]
       cat("        Rhat values         :", round(rhat_vals, digits = 4), "\n", sep = " ")
@@ -856,7 +866,7 @@ mcmc.extract <- function(chains, name, rhat = TRUE, ess = TRUE) {
     mcmc.obj <- lapply(mcmc.chains, as.mcmc)
     mcmc.objs <- mcmc.list(mcmc.obj)
     
-    # Compute Gelman-Rubin diagnostic (Rhat) and Effective Sample Size (ESS)
+    ## Compute Gelman-Rubin diagnostic (Rhat) and Effective Sample Size (ESS)
     if (rhat) {
       rhat_vals <- gelman.diag(mcmc.objs, autoburnin = FALSE)$psrf[, 1]
       cat("        Rhat values         :", round(rhat_vals, digits = 4), "\n", sep = " ")
@@ -876,39 +886,44 @@ mcmc.extract <- function(chains, name, rhat = TRUE, ess = TRUE) {
 ###        Check Label-Switching        ###
 ###-------------------------------------###
 
-check.label_switching <- function(mcmc.chains, order_fun = function(x) order(x, decreasing = TRUE), plot = TRUE) {
-  mcmc  <- nrow(mcmc.chains)
-  N <- ncol(mcmc.chains)
+## INPUT:
+# num.chains:   Number of MCMC chains.
+# mcmc.chains:  A list of specific MCMC samples from each chain.
+# decimal:      Number of digits for rounding the results.
+# order.func:   Function that returns the component order for each draw
+
+## OUTPUT:
+# Creates a trace plot and heat map.
+# Prints Label-Switching diagnostics for the specified parameter.
+
+# Creates a 2 × num.chains panel: upper row = trace plot, lower row = heat-map.
+# Prints switch-rate for each chain.
+
+LabelSwitching.diag <- function(num.chains = 1, mcmc.chains, decimal = 4,
+                                order.func = function(x) order(x, decreasing = TRUE)) {
+  ## Preparation
+  mcmc <- dim(mcmc.chains[[1]])[1]
+  N <- dim(mcmc.chains[[1]])[2]
+  par(mfcol = c(2, num.chains), mar = c(4, 4, 2, 1), oma = c(0, 0, 3, 0))
+  cat("Label-Switching rate for worths parameters: \n")
   
-  # Set up the plotting area
-  par(mfrow = c(1, N), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
-  
-  # 1) permutation matrix (mcmc × N)
-  perm_mat <- t(apply(mcmc.chains, 1, order_fun))
-  
-  # 2) how often the permutation changes
-  change_vec   <- rowSums(perm_mat[-1, ] != perm_mat[-mcmc, ])
-  switch_rate  <- mean(change_vec > 0)
-  
-  if(plot) {
-    ## (a) トレースプロット
-    matplot(mcmc.chains, type = "l", lty = 1, col = rainbow(N),
-            xlab = "iteration", ylab = "w", main = "Trace of w-components")
-    legend("topleft", legend = paste0("dim", 1:K), col = rainbow(K), lty = 1, cex = .6)
+  for (chain in 1:num.chains) {
+    # Compute the label-switching rate for the components
+    perm.mat <- t(apply(mcmc.chains[[chain]], 1, order.func))
+    change.vec  <- rowSums(perm.mat[-1, ] != perm.mat[-mcmc, ])
+    switch.rate <- mean(change.vec > 0)
     
-    ## (b) permutation heat-map
-    image(t(perm_mat), axes = FALSE, col = rainbow(N),
-          main = "permutation matrix (rows = iteration)")
-    axis(2, at = seq(0,1,length.out=N), labels = paste0("pos", 1:N), las = 2)
+    # Trace plot
+    matplot(mcmc.chains[[chain]], type = "l", lty = 1, col = rainbow(N),
+            xlab = "iteration", ylab = "w", main = "Trace of worths")
+    legend("topleft", legend = paste0("Entity", 1:N), col = rainbow(N), lty = 1, cex = .6)
+    
+    # Heat map of permutation
+    image(t(perm.mat), axes = FALSE, useRaster = TRUE, col = rainbow(N),
+          main = paste0("perm (chain ", chain, ")"))
+    axis(2, at = seq(0, 1, length.out = N),
+         labels = paste0("pos", 1:N), las = 2, cex.axis = .6)
+    
+    cat("Chain", chain, "=", round(switch.rate, decimal), "\n")
   }
-  
-  out <- list(perm_mat = perm_mat,
-              change_vec = change_vec,
-              switch_rate = switch_rate)
-  class(out) <- "labelSwitchDiag"
-  return(out)
 }
-
-
-
-
