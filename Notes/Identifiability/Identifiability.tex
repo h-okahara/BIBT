@@ -111,30 +111,25 @@ The multiple unobservable parameters in the equation \eqref{eq:model} induce the
 
 Identification can be dealt with by specifying additional assumptions and constraints that render the model estimable.
 In general, we say that a statistical model is identifiable if distinct parameter values generate different joint probability distributions.
-The likelihood of a TDBT model can be underidentified for the following five reasons: location invariance, scale invariance, reflective invariance, label switching, and rotation invariance.
+The likelihood of a TDBT model can be underidentified for the following five reasons: location invariance, scale invariance, reflective invariance, rotation invariance, and label switching.
 
 
  
 \section*{Location and Scale Invariance}
-For illustration, consider the TDBT model with the linear predictor $z_{ij} = w (f_{i} - f_{j})$.
-If we add a constant vector $\delta = (\delta_{1}, \dots, \delta_{K})^{\top}$ to both $f_{i}$ and $f_{j}$, the likelihood still remains the same.
-In addition, if we divide $w$ by a constant vector $c = (c_{1}, \dots, c_{K})^{\top}$ ($c_{k} \in \mathbb{R} \backslash \{0\}$) and multiply both $f_{i}$ and $f_{j}$ by the same constant, the likelihood remains unchanged:
+For illustration, consider the TDBT model with the linear predictor $z_{ij} = w^{\top} (f_{i} - f_{j})$.
+Adding a constant vector $\delta = (\delta_{1}, \dots, \delta_{K})^{\top}$ to both $f_{i}$ and $f_{j}$ does not change the likelihood.
+Furthermore,  if each element of $w$ is divided by the corresponding constant in $c = (c_{1}, \dots, c_{K})^{\top}$ with $c_{k} \in \mathbb{R} \backslash \{0\}$, and each element of $f_{i}$ and $f_{j}$ is multiplied by the corresponding constant in $c$, the likelihood also remains unchanged:
 \begin{equation}
-    p(Y \mid w, F) = p \Bigl(Y \mid \tilde w, \tilde F \Bigr)
+    p \Bigl(Y \mid \tilde w, \tilde F \Bigr) = p(Y \mid w, F)
 \end{equation}
 where $\tilde w = \bigl(\tfrac{w_1}{c_1}, \dots, \tfrac{w_K}{c_K} \bigr)^{\top}$, $\tilde F = \{ \tilde f_{1}, \dots, \tilde f_{N} \}$ and $\tilde f_{n} = (c_{1} (f_{n1} + \delta_{1}), \dots, c_{K} (f_{nK} + \delta_{K}))^{\top}$ for $n=1,\dots,N$; $k=1,\dots,K$.
-To address this issue, one method is to assign a very strong prior to $f_{i}$ \citep[e.g.,][]{bafumi2005Practical}, a fixed population distribution that can determine the location and scale of the parameter space for the entire likelihood function $p(Y \mid w,F)$.
-The constraint is simply
-\begin{equation}
-    f_{i} \sim \mathcal{N}_{K} (\mathbf{0}, \boldsymbol{I}) \quad \text{for} \ i= 1, 2, \dots, N.
-\end{equation}
-
 
 
 
 
 \section*{Reflective Invariance}
-Even after eliminating additive and multiplicative aliasing, the likelihood of the TDBT model remains invariant when every element of the $k$-th dimension is multiplied by $-1$ simultaneously in the weight vector $w$ and in all worth vectors $f_{i}$, so there exists $2^{K}$ equivalent parameterizations.
+Even after additive and multiplicative invariance have been removed, the likelihood of the TDBT model still exhibits a sign ambiguity.
+Specifically, multiplying the $k$-th coordinate of $w$ and the corresponding coordinate of every $f_{i}$ by $-1$ leaves the likelihood unchanged, so there are $2^K$ equivalent parameterizations.
 A common remedy to remove this ambiguity is to impose a sign-identification rule, for example, to restrict the support of $w$ to the positive orthant as follows:
 \begin{equation}
     w_{k}>0 \quad\text{for}\;k=1,\dots,K.
@@ -145,17 +140,16 @@ Therefore, this positivity constraint resolves reflective invariance without aff
 
 
 
+\section*{Rotation Invariance}
+When $K \geq 2$, the linear predictor $z_{ij} = w^{\top} (f_{i} - f_{j})$ is also invariant under orthogonal rotations of the latent space. 
+Specifically, for any orthogonal matrix $R \in \mathbb{R}^{K \times K}$ satisfying $R^{\top} R = R R^{\top} = I_K$, the transformation $\bar{f}_{i} = R f_i \quad \text{and} \quad \bar{w} = R w$ leaves the likelihood unchanged:
+\begin{equation}
+     \bar{w}^{\top} (\bar{f}_i - \bar{f}_j) = (R w)^{\top} (R f_i - R f_j) = w^{\top} (f_i - f_j).
+\end{equation}
+
 
 \section*{Label Switching}
-In multidimensional setting, another issue arises.
-For $K$ dimensions, there are $K!$ permutations of parameter labels that yield the same likelihood. 
-Combined with sign reversals, the likelihood has $2^{K} \times K!$ symmetric modes.
-
-
-
-
-\section*{Rotation Invariance}
-
+When $K \geq 2$, there are $K!$ permutations of parameter labels that yield the same likelihood.
 
 
 
