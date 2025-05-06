@@ -15,10 +15,10 @@
 ## OUTPUT:
 # A matrix of MCMC samples for the parameters: omega, w, F, V.
 
-TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000, 
-                       w0.prior = seq(3, 1, -1), S0.prior = diag(1, 3), 
-                       F.prior = matrix(0, nrow = 3, ncol = N), 
-                       V.prior = rep(1, 3), alpha = 3) {
+TDBT.Gibbs <- function(X, K = 100, mcmc = 10000, burn = 2000, 
+                       w0.prior = rep(1, 100), S0.prior = diag(1, 100), 
+                       F.prior = matrix(0, nrow = 100, ncol = N),
+                       V.prior = rep(2, 100), alpha = 2) {
   ## Preparation
   entity.name <- unique(c(X[ ,1], X[ ,2]))
   N <- length(entity.name)       # number of entities
@@ -54,7 +54,7 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000,
     # -----------------------  BEGIN Updating  ---------------------------------
     ## Updating omega
     for (p in 1:num.pairs) {
-      omega[p] <- rpg(n = 1, h = X$n_ij[p], z = sum(w * Phi[p, ]))  # sample omega[p] from Polya-Gamma distribution
+      omega[p] <- rpg(n = 1, h = X$n_ij[p], z = sum(w * Phi[p, ]))  # sample omega[p] from Pólya-Gamma distribution
     }
     
     ## Updating w
@@ -68,7 +68,30 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000,
     B.omega <- t(Phi) %*% kappa + S0.inv %*% w0
     w.mean <- as.vector(A.omega %*% B.omega)
     w.Sigma <- A.omega
-    w <- mvrnorm(1, mu = w.mean, Sigma = w.Sigma)
+    # w <- mvrnorm(1, mu = w.mean, Sigma = w.Sigma)
+    
+    for(k in 1:K){
+      idx <- setdiff(1:K, k)
+      inv.part <- tryCatch({
+        solve(w.Sigma[idx, idx])
+      }, error = function(e) {
+        message("Error in computing inverse matrix in", k,"th off-diagonal block: ", e$message)
+        return(NULL)
+      })
+      mu.cond <- w.mean[k] + w.Sigma[k, idx] %*% inv.part %*% (w[idx] - w.mean[idx])
+      var.cond <- w.Sigma[k, k] - w.Sigma[k, idx] %*% inv.part %*% w.Sigma[idx, k]
+
+      # Sampling from the truncated Normal distribution
+      if (iter != 1) {
+        lower <- if (k == K) 0 else w[k+1]
+        upper <- if (k == 1) Inf else w[k-1] 
+      } else {
+        lower <- 0
+        upper <- if (k == 1) Inf else w[k-1]
+      }
+      w[k] <- rtnorm(n = 1, mu = as.numeric(mu.cond), sd = sqrt(var.cond),
+                     lb = lower, ub = upper)
+    }
     
     ## Updating f_i for i = 1,...,N
     omega_i <- numeric(N)
@@ -109,44 +132,33 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000,
     Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
     
     ## Updating v_s and tau_s for s = 2,...,K
-    alphas[2:K] <- alphas0[2:K] + (N/2) * (K-(2:K)+1)
     sq.F_k <- rowSums(F.worths^2)
+    alphas[2:K] <- alphas0[2:K] + (N/2) * (K-(2:K)+1)
     betas[2:K] <- sapply(2:K, function(s) {
       betas0[s] + 0.5 * sum(tau[s:K] / V[s] * sq.F_k[s:K])
     })
     
+    # Sampling from the truncated Gamma distribution
     for (s in 2:K) {
-      V[s] <- rtrunc(n = 1, spec = "gamma", a = 1, b = Inf, shape = alphas[s], rate = betas[s]) # Sampling from the trunc. Gamma distribution
+      V[s] <- rtrunc(n = 1, spec = "gamma", a = 1, b = Inf, shape = alphas[s], rate = betas[s])
     }
     tau <- cumprod(V)
     # ------------------------  END Updating  ----------------------------------
     
     # ---------------------  BEGIN Normalization  ------------------------------
-    ## Set w to be positive
-    neg.idx <- which(w < 0)
-    if(length(neg.idx)) {
-      w[neg.idx] <- -w[neg.idx]
-      F.worths[neg.idx,  ] <- -F.worths[neg.idx, , drop = FALSE]
-    }
-    
     ## Remove location indeterminacy
     # Here, either impose the sum-to-zero constraint, 
     # or impose endpoint constraints at line 159
     # worths <- drop(w %*% F.worths)
     # shift  <- (mean(worths) / sum(w^2)) * w
     # F.worths <- sweep(F.worths, 2, shift, "-")
-    
-    ## Remove scale indeterminacy
-    # w.scale <- mean(w)
-    # w  <- w / w.scale
-    # F.worths  <- F.worths * w.scale
     # ---------------------  END Normalization  --------------------------------
     
     ## Store posterior samples
     w.pos[iter, ] <- w
     F.pos[iter, , ] <- F.worths
     V.pos[iter, ] <- V
-    worths.pos[iter, ] <- w %*% F.worths[,1:N]
+    worths.pos[iter, ] <- w %*% F.worths[,1:N] - apply(w %*% F.worths[,1:N], 2, mean)[N] # parallel translation
   }
   #=======================   END MCMC sampling   ===============================
   
@@ -156,14 +168,6 @@ TDBT.Gibbs <- function(X, K = 3, mcmc = 10000, burn = 2000,
   F.pos <- F.pos[-om, , ]
   V.pos <- V.pos[-om, ]
   worths.pos <- worths.pos[-om, ]
-  worths.pos <- worths.pos - apply(worths.pos, 2, mean)[N] # parallel translation
-  
-  ## Reorder w in descending order
-  for(iter in 1:(mcmc-burn)) {
-    ord <- order(w.pos[iter, ], decreasing = TRUE)
-    w.pos[iter, ]  <- w.pos[iter, ord]
-    F.pos[iter, , ] <- F.pos[iter, ord, ]
-  }
   
   result <- list(w = w.pos, F.worths = F.pos, V = V.pos, worths = worths.pos)
   return(result)
@@ -392,12 +396,12 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, bins = 30) {
 ## INPUT:
 # num.chains:   Number of MCMC chains.
 # mcmc.chains:  A list of specific MCMC samples from each chain.
-# name:     A string representing the name of parameters.
+# param.name:   A string representing the name of parameters.
 
 ## OUTPUT:
 # For each chain, prints a data frame of posterior statistics (mean and median) for each parameter.
 
-stats.posteriors <- function(num.chains = 1, mcmc.chains, param.name, entities.name, decimal = 4) {
+stats.posteriors <- function(num.chains = 1, mcmc.chains, param.name, decimal = 4) {
   if (param.name == "F.worths") {
     for (chain in 1:num.chains) {
       cat("Chain", chain, "\n")
@@ -426,7 +430,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, param.name, entities.n
       ## Compute the mean and median
       means <- apply(mcmc.chains[[chain]], 2, mean)
       medians <- apply(mcmc.chains[[chain]], 2, median)
-      stats <- data.frame(Variable = entities.name, # paste0(name, "_", 1:K),
+      stats <- data.frame(Variable = paste0(param.name, "_", 1:K),
                           Mean = round(means, decimal),
                           Median = round(medians, decimal))
       print(stats, row.names = FALSE)
