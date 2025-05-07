@@ -158,7 +158,7 @@ TDBT.Gibbs <- function(X, K = 100, mcmc = 10000, burn = 2000,
     w.pos[iter, ] <- w
     F.pos[iter, , ] <- F.worths
     V.pos[iter, ] <- V
-    worths.pos[iter, ] <- w %*% F.worths[,1:N] - apply(w %*% F.worths[,1:N], 2, mean)[N] # parallel translation
+    worths.pos[iter, ] <- w %*% F.worths[,1:N] - mean(w %*% F.worths[,1:N]) # centering
   }
   #=======================   END MCMC sampling   ===============================
   
@@ -168,7 +168,6 @@ TDBT.Gibbs <- function(X, K = 100, mcmc = 10000, burn = 2000,
   F.pos <- F.pos[-om, , ]
   V.pos <- V.pos[-om, ]
   worths.pos <- worths.pos[-om, ]
-  
   result <- list(w = w.pos, F.worths = F.pos, V = V.pos, worths = worths.pos)
   return(result)
 }
