@@ -178,7 +178,7 @@ TDBT.Gibbs <- function(X, K = 100, mcmc = 10000, burn = 2000,
 
 ###------------------------------------------------------------###
 ###        Trans-Dimensional Bradley-Terry (TDBT) model        ###
-###               (Dimensionality Adaption ver.)               ###
+###               (Dimensionality Adaptation ver.)             ###
 ###------------------------------------------------------------###
 
 ## INPUT:
