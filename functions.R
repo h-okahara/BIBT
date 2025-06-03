@@ -4,13 +4,16 @@
 ###------------------------------------------------------------###
 
 ## INPUT:
-# X:      An N×N matrix where the (i, j) entry indicates that player i defeats player j.
-# K:      The dimensionality of the "worth" vector f.
-# w:      A K×1 vector representing the relative weight of each dimension in f.
-# F:      A K×N matrix where each column f_i represents the worth vector of player i.
-# V:      A K×1 vector where each value v_s (except v_1 = 1) follows a truncated Gamma distribution 
-#         in the range [1,ingty) with Ga(alpha, 1) distribution.
-# alpha:  A hyperparameter of the truncated Gamma distribution
+# X:        An N×N matrix where the (i, j) entry indicates that player i defeats player j;
+# K0:       The dimensionality of the "worth" vector f;
+# mcmc:     Number of iterations;
+# burn:     Burn-in period;
+# w0.prior: A K×1 vector representing the relative weight of each dimension in f;
+# S0.prior: A K×K matrix representing covariance matrix of weight vector;
+# F.prior:  A K×N matrix where each column f_i represents the worth vector of player i;
+# V.prior:  A K×1 vector where each value v_s (except v_1 = 1) follows a truncated Gamma distribution;
+#           in the range [1,ingty) with Ga(alpha, 1) distribution;
+# alpha:    A hyperparameter of the truncated Gamma distribution;
 
 ## OUTPUT:
 # A matrix of MCMC samples for the parameters: omega, w, F, V.
@@ -42,7 +45,7 @@ TDBT.Gibbs <- function(X, K = 100, mcmc = 10000, burn = 2000,
   Phi <- matrix(NA, nrow = K, ncol = num.pairs)
   Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
   omega <- rep(NA, num.pairs)
-
+  
   ## Vectors/matrices to store posterior samples
   w.pos <- matrix(0, nrow = mcmc, ncol = K)
   F.pos <- array(0, dim = c(mcmc, K, N))
@@ -60,7 +63,7 @@ TDBT.Gibbs <- function(X, K = 100, mcmc = 10000, burn = 2000,
     ## Updating w
     inv.part <- tryCatch({
       solve(diag(1/omega) + Phi %*% S0 %*% t(Phi))
-      }, error = function(e) {
+    }, error = function(e) {
       message("Error in computing inverse matrix in A.omega: ", e$message)
       return(NULL)
     })
@@ -80,7 +83,7 @@ TDBT.Gibbs <- function(X, K = 100, mcmc = 10000, burn = 2000,
       })
       mu.cond <- w.mean[k] + w.Sigma[k, idx] %*% inv.part %*% (w[idx] - w.mean[idx])
       var.cond <- w.Sigma[k, k] - w.Sigma[k, idx] %*% inv.part %*% w.Sigma[idx, k]
-
+      
       # Sampling from the truncated Normal distribution
       if (iter != 1) {
         lower <- if (k == K) 0 else w[k+1]
@@ -144,21 +147,19 @@ TDBT.Gibbs <- function(X, K = 100, mcmc = 10000, burn = 2000,
     }
     tau <- cumprod(V)
     # ------------------------  END Updating  ----------------------------------
-    
-    # ---------------------  BEGIN Normalization  ------------------------------
     ## Remove location indeterminacy
-    # Here, either impose the sum-to-zero constraint, 
-    # or impose endpoint constraints at line 159
-    # worths <- drop(w %*% F.worths)
+    # Here, either impose the sum-to-zero constraint or endpoint constraints.
+    row.means <- rowMeans(F.worths[, 1:N])
+    F.worths <- F.worths - row.means # centering
+    # worths <- w %*% F.worths[,1:N]
     # shift  <- (mean(worths) / sum(w^2)) * w
-    # F.worths <- sweep(F.worths, 2, shift, "-")
-    # ---------------------  END Normalization  --------------------------------
+    # F.worths <- F.worths - shift  # centering
     
     ## Store posterior samples
     w.pos[iter, ] <- w
     F.pos[iter, , ] <- F.worths
     V.pos[iter, ] <- V
-    worths.pos[iter, ] <- w %*% F.worths[,1:N] - mean(w %*% F.worths[,1:N]) # centering
+    worths.pos[iter, ] <- w %*% F.worths[,1:N]
   }
   #=======================   END MCMC sampling   ===============================
   
@@ -169,6 +170,215 @@ TDBT.Gibbs <- function(X, K = 100, mcmc = 10000, burn = 2000,
   V.pos <- V.pos[-om, ]
   worths.pos <- worths.pos[-om, ]
   result <- list(w = w.pos, F.worths = F.pos, V = V.pos, worths = worths.pos)
+  return(result)
+}
+
+
+
+
+###------------------------------------------------------------###
+###        Trans-Dimensional Bradley-Terry (TDBT) model        ###
+###               (Dimensionality Adaption ver.)               ###
+###------------------------------------------------------------###
+
+## INPUT:
+# X:        An N×N matrix where the (i, j) entry indicates that player i defeats player j;
+# K0:       The dimensionality of the "worth" vector f;
+# mcmc:     Number of iterations;
+# burn:     Burn-in period;
+# thin:     A thinning interval;
+# epsilon:  threshold below which a dimension is considered negligible;
+# w0.prior: A K×1 vector representing the relative weight of each dimension in f;
+# S0.prior: A K×K matrix representing covariance matrix of weight vector;
+# F.prior:  A K×N matrix where each column f_i represents the worth vector of player i;
+# V.prior:  A K×1 vector where each value v_s (except v_1 = 1) follows a truncated Gamma distribution;
+#           in the range [1,ingty) with Ga(alpha, 1) distribution;
+# alpha:    A hyperparameter of the truncated Gamma distribution;
+
+## OUTPUT:
+# A list of MCMC samples for the parameters: omega, w, F, V.
+
+TDBT.Gibbs.adapt <- function(X, K0 = 100, mcmc = 10000, burn = 2000, 
+                             thin = 1, epsilon = 1e-3, rate = 1,
+                             w0.prior = rep(1, 100), S0.prior = diag(1, 100), 
+                             F.prior = matrix(0, nrow = 100, ncol = N),
+                             V.prior = rep(2, 100), alpha = 2) {
+  ## Preparation
+  entity.name <- unique(c(X[ ,1], X[ ,2]))
+  N <- length(entity.name)       # number of entities
+  entity.index <- setNames(1:N, entity.name)
+  pairs <- cbind(entity.index[X[ ,1]], entity.index[X[ ,2]])
+  rownames(pairs) <- NULL 
+  num.pairs <- nrow(pairs)    # number of unique (i, j) pairs
+  if(num.pairs!=nrow(X)){stop("Number of pairs is not equal to the length of X")}
+  
+  ## Initial values
+  K <- K0
+  w0 <- w <- w0.prior
+  S0 <- S0.prior
+  S0.inv <- solve(S0)
+  F.worths <- F.prior
+  V <- V.prior
+  V[1] <- 1
+  tau <- cumprod(V)
+  alphas <- alphas0 <- rep(alpha, K0)
+  betas <- betas0 <- rep(1, K0)
+  kappa <- X$y_ij - X$n_ij/2
+  Phi <- matrix(NA, nrow = K, ncol = num.pairs)
+  Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+  omega <- rep(NA, num.pairs)
+  
+  # hyperparameters for dimensionality decision
+  a0 <- -1
+  a1 <- -5e-4
+  sample.idx <- 0
+  
+  ## Vectors/matrices to store posterior samples
+  w.pos <- vector("list", mcmc - burn)
+  F.pos <- vector("list", mcmc - burn)
+  V.pos <- vector("list", mcmc - burn)
+  worths.pos <- matrix(0, nrow = mcmc-burn, ncol = N)
+  K.pos <- numeric(mcmc - burn) 
+  
+  #=======================   BEGIN MCMC sampling   =============================
+  for (iter in 1:mcmc) {
+    # -----------------------  BEGIN Updating  ---------------------------------
+    ## Updating omega
+    for (p in 1:num.pairs) {
+      omega[p] <- rpg(n = 1, h = X$n_ij[p], z = sum(w * Phi[p, ]))  # sample omega[p] from Pólya-Gamma distribution
+    }
+    
+    ## Updating w
+    inv.part <- tryCatch({
+      solve(diag(1/omega) + Phi %*% S0 %*% t(Phi))
+      }, error = function(e) {
+      message("Error in computing inverse matrix in A.omega: ", e$message)
+      return(NULL)
+    })
+    A.omega <- S0 - S0 %*% t(Phi) %*% inv.part %*% Phi %*% S0  # Woodbury formula
+    B.omega <- t(Phi) %*% kappa + S0.inv %*% w0
+    w.mean <- as.vector(A.omega %*% B.omega)
+    w.Sigma <- A.omega
+    w <- mvrnorm(1, mu = w.mean, Sigma = w.Sigma)
+
+    ## Updating f_i for i = 1,...,N
+    omega_i <- numeric(N)
+    eta_i <- numeric(N)
+    
+    # i = 1
+    idx_1 <- which(pairs[,1] == 1)
+    omega_i[1] <- sum(omega[idx_1])
+    eta_i[1] <- sum(kappa[idx_1] + omega[idx_1] * (t(w) %*% F.worths[, pairs[idx_1, 2]]))
+    
+    # i = N
+    idx_N <- which(pairs[,2] == N)
+    omega_i[N] <- sum(omega[idx_N])
+    eta_i[N] <- -sum(kappa[idx_N] - omega[idx_N] * (t(w) %*% F.worths[, pairs[idx_N, 1]]))
+    
+    # i = 2,...,N-1
+    for (i in 2:(N-1)) {
+      upper.idx <- which(pairs[, 1] == i)  # i<j
+      omega_i[i] <- omega_i[i] + sum(omega[upper.idx])
+      eta_i[i] <- eta_i[i] + sum(kappa[upper.idx] + omega[upper.idx] * (t(w) %*% F.worths[, pairs[upper.idx, 2]]))
+      
+      lower.idx <- which(pairs[, 2] == i)  # j<i
+      omega_i[i] <- omega_i[i] + sum(omega[lower.idx])
+      eta_i[i] <- eta_i[i] - sum(kappa[lower.idx] - omega[lower.idx] * (t(w) %*% F.worths[, pairs[lower.idx, 1]]))
+    }
+    
+    for (i in 1:N) {
+      tau.inv <- diag(1/tau,K,K)
+      denom <- 1/omega_i[i] + t(w) %*% tau.inv %*% w
+      A_f <- tau.inv - (1/as.numeric(denom)) * (tau.inv %*% w %*% t(w) %*% tau.inv)  # Woodbury formula
+      B_f <- eta_i[i] * w
+      f_i.mean <- as.vector(A_f %*% B_f)
+      f_i.Sigma <- A_f
+      F.worths[ ,i] <- mvrnorm(1, mu = f_i.mean, Sigma = f_i.Sigma)
+    }
+    
+    ## Updating Phi
+    Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+    
+    ## Updating v_s and tau_s for s = 2,...,K
+    sq.F_k <- rowSums(F.worths^2)
+    alphas[2:K] <- alphas0[2:K] + (N/2) * (K-(2:K)+1)
+    betas[2:K] <- sapply(2:K, function(s) {
+      betas0[s] + 0.5 * sum(tau[s:K] / V[s] * sq.F_k[s:K])
+    })
+    
+    # Sampling from the truncated Gamma distribution
+    for (s in 2:K) {
+      V[s] <- rtrunc(n = 1, spec = "gamma", a = 1, b = Inf, shape = alphas[s], rate = betas[s])
+    }
+    tau <- cumprod(V)
+    # ------------------------  END Updating  ----------------------------------
+    
+    # -----------------  BEGIN Adjust Dimensionality ---------------------------
+    prob <- exp(a0 + a1*iter) # probability of adapting
+    uu = runif(1)
+    prop = rowSums(abs(F.worths) < epsilon)/N # proportion of elements in each row less than eps in magnitude
+    m_t = sum(prop >= rate)  # number of redundant columns
+    
+    if (uu < prob) {
+      ## Decide whether to add a new dimension (birth) or remove inactive ones (death)
+      if (iter > 20 && m_t == 0 && all(prop < 0.995)) { # Birth
+        
+        if (K0 > K) {
+          K <- min(K + 1, K0)  # Update K
+          
+          w <- c(w, w0.prior[K])
+          F.worths <- rbind(F.worths, F.prior[K,])
+          Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+          V <- c(V, V.prior[K])
+          alphas <- c(alphas, alphas0[K])
+          betas <- c(betas, betas0[K])
+          tau <- cumprod(V)
+
+          w0 <- c(w0, w0.prior[K])
+          S0 <- S0.inv <- diag(K)
+        }
+      } else { # Death
+        remove.idx <- prop < rate  # Dimensions to remove
+        
+        # Shrink negligible dimensions
+        if (K > m_t && m_t != 0) {
+          K <- max(K - m_t, 1)  # Update K
+          
+          w <- w[remove.idx]
+          F.worths <- F.worths[remove.idx, , drop = FALSE]
+          Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+          V <- V[remove.idx]
+          alphas <- alphas[remove.idx]
+          betas <- betas[remove.idx]
+          tau <- cumprod(V) 
+          
+          w0 <- w0[remove.idx]
+          S0 <- S0[remove.idx, remove.idx]
+          S0.inv <- S0.inv[remove.idx, remove.idx]
+        }
+      }
+    }
+    # ------------------  END Adjust Dimensionality ----------------------------
+    
+    ## Remove location indeterminacy
+    # Here, either impose the sum-to-zero constraint or endpoint constraints.
+    row.means <- rowMeans(F.worths[, 1:N])
+    F.worths <- F.worths - row.means # centering
+    
+    ## Store posterior samples
+    if (iter > burn && iter %% thin == 0) {
+      sample.idx <- sample.idx + 1
+      
+      w.pos[[sample.idx]] <- w
+      F.pos[[sample.idx]] <- F.worths 
+      V.pos[[sample.idx]] <- V
+      worths.pos[sample.idx, ] <- w %*% F.worths[, 1:N, drop = FALSE]
+      K.pos[sample.idx] <- K
+    }
+  }
+  #=======================   END MCMC sampling   ===============================
+  
+  result <- list(w = w.pos, F.worths = F.pos, V = V.pos, worths = worths.pos, K = K.pos)
   return(result)
 }
 
@@ -198,6 +408,7 @@ TDBT.Gibbs <- function(X, K = 100, mcmc = 10000, burn = 2000,
 
 run.MCMCs <- function(num.chains = 1, name, MCMC.plot = TRUE, rhat = FALSE, ess = FALSE,
                       X, K = 3, mcmc = 10000, burn = 2000, 
+                      thin = 1, epsilon = 1e-3, rate = 1,
                       w0.prior = rep(1, 3), S0.prior = diag(1, 3), 
                       F.prior = matrix(0, nrow = 3, ncol = 4), 
                       V.prior = rep(1, 3), alpha = 2) {
@@ -207,9 +418,10 @@ run.MCMCs <- function(num.chains = 1, name, MCMC.plot = TRUE, rhat = FALSE, ess 
   if (K > 1) {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(73 + chain.id)
-      TDBT.Gibbs(X, K = K, mcmc = mcmc, burn = burn, 
-                 w0.prior = w0.prior, S0.prior = S0.prior, 
-                 F.prior = F.prior, V.prior = V.prior, alpha = alpha)
+      TDBT.Gibbs.adapt(X, K = K, mcmc = mcmc, burn = burn,
+                       thin = thin, epsilon = epsilon, rate = rate,
+                       w0.prior = w0.prior, S0.prior = S0.prior, 
+                       F.prior = F.prior, V.prior = V.prior, alpha = alpha)
     }, mc.cores = min(num.chains, parallel::detectCores()-1)) 
   } else {
     stop("Dimensionality must be K > 1")
@@ -441,6 +653,91 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, param.name, decimal = 
 
 
 
+###-----------------------------------------###
+###           Plot ACFs for MCMC            ###
+###-----------------------------------------###
+
+## INPUT:
+# num.chains:   Number of MCMC chains.
+# mcmc.chains:  A list of specific MCMC samples from each chain.
+# name:         A string representing the name of the parameter.
+
+## OUTPUT:
+# Plots the autocorrelation function (ACF) for the given MCMC samples, overlaying results from all chains.
+
+plot.ACFs <- function(num.chains = 1, mcmc.chains, name) {
+  if (name == "F.worths") {
+    mcmc    <- dim(mcmc.chains[[1]])[1]
+    K     <- dim(mcmc.chains[[1]])[2]
+    N<- dim(mcmc.chains[[1]])[3]
+    
+    ## Set up the plotting area
+    par(mfrow = c(N, K), mar = c(2, 2, 4, 1), oma = c(2, 1, 2, 1))
+    
+    ## Loop over each entity and each dimension
+    for (e in 1:N) {
+      for (k in 1:K) {
+        acf.base <- acf(mcmc.chains[[1]][, k, e], plot = FALSE)
+        plot(acf.base, main = paste0("f_", e, k), col = 1)
+        
+        # Overlay ACF lines from remaining chains
+        if (num.chains > 1) {
+          for (i in 2:num.chains) {
+            acf.chain <- acf(mcmc.chains[[i]][, k, e], plot = FALSE)
+            lines(acf.chain$lag, acf.chain$acf, col = i, lwd = 2)
+          }
+        }
+      }
+    }
+    mtext("ACF Plots for F", outer = TRUE, cex = 1.5)
+  } else if (name == "V") {
+    mcmc <- nrow(mcmc.chains[[1]])
+    K  <- ncol(mcmc.chains[[1]])
+    
+    ## Loop over each entity and each dimension
+    par(mfrow = c(1, K-1), mar = c(2, 2, 4, 1), oma = c(2, 1, 2, 1))
+    
+    ## Loop over each dimension
+    for (s in 2:K) {
+      acf.base <- acf(mcmc.chains[[1]][, s], plot = FALSE)
+      plot(acf.base, main = paste0("v_", s), col = 1)
+      
+      # Overlay ACF lines from remaining chains
+      if (num.chains > 1) {
+        for (i in 2:num.chains) {
+          acf.chain <- acf(mcmc.chains[[i]][, s], plot = FALSE)
+          lines(acf.chain$lag, acf.chain$acf, col = i, lwd = 2)
+        }
+      }
+    }
+    mtext("ACF Plots for v", outer = TRUE, cex = 1.5)
+  } else {
+    mcmc <- nrow(mcmc.chains[[1]])
+    K  <- ncol(mcmc.chains[[1]])
+    
+    ## Loop over each entity and each dimension
+    par(mfrow = c(1, K), mar = c(2, 2, 4, 1), oma = c(2, 1, 2, 1))
+    
+    ## Loop over each dimension
+    for (k in 1:K) {
+      acf.base <- acf(mcmc.chains[[1]][, k], plot = FALSE)
+      plot(acf.base, main = paste0(name, "_", k), col = 1)
+      
+      # Overlay ACF lines from remaining chains
+      if (num.chains > 1) {
+        for (i in 2:num.chains) {
+          acf.chain <- acf(mcmc.chains[[i]][, k], plot = FALSE)
+          lines(acf.chain$lag, acf.chain$acf, col = i, lwd = 2)
+        }
+      }
+    }
+    mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
+  }
+}
+
+
+
+
 ###------------------------------------------###
 ###        Compute Credible Intervals        ###
 ###------------------------------------------###
@@ -530,91 +827,6 @@ compute.CIs <- function(num.chains = 1, mcmc.chains, name, level = 0.95, decimal
       }
       cat("----------------------------\n")
     }
-  }
-}
-
-
-
-
-###-----------------------------------------###
-###           Plot ACFs for MCMC            ###
-###-----------------------------------------###
-
-## INPUT:
-# num.chains:   Number of MCMC chains.
-# mcmc.chains:  A list of specific MCMC samples from each chain.
-# name:         A string representing the name of the parameter.
-
-## OUTPUT:
-# Plots the autocorrelation function (ACF) for the given MCMC samples, overlaying results from all chains.
-
-plot.ACFs <- function(num.chains = 1, mcmc.chains, name) {
-  if (name == "F.worths") {
-    mcmc    <- dim(mcmc.chains[[1]])[1]
-    K     <- dim(mcmc.chains[[1]])[2]
-    N<- dim(mcmc.chains[[1]])[3]
-    
-    ## Set up the plotting area
-    par(mfrow = c(N, K), mar = c(2, 2, 4, 1), oma = c(2, 1, 2, 1))
-    
-    ## Loop over each entity and each dimension
-    for (e in 1:N) {
-      for (k in 1:K) {
-        acf.base <- acf(mcmc.chains[[1]][, k, e], plot = FALSE)
-        plot(acf.base, main = paste0("f_", e, k), col = 1)
-        
-        # Overlay ACF lines from remaining chains
-        if (num.chains > 1) {
-          for (i in 2:num.chains) {
-            acf.chain <- acf(mcmc.chains[[i]][, k, e], plot = FALSE)
-            lines(acf.chain$lag, acf.chain$acf, col = i, lwd = 2)
-          }
-        }
-      }
-    }
-    mtext("ACF Plots for F", outer = TRUE, cex = 1.5)
-  } else if (name == "V") {
-    mcmc <- nrow(mcmc.chains[[1]])
-    K  <- ncol(mcmc.chains[[1]])
-    
-    ## Loop over each entity and each dimension
-    par(mfrow = c(1, K-1), mar = c(2, 2, 4, 1), oma = c(2, 1, 2, 1))
-    
-    ## Loop over each dimension
-    for (s in 2:K) {
-      acf.base <- acf(mcmc.chains[[1]][, s], plot = FALSE)
-      plot(acf.base, main = paste0("v_", s), col = 1)
-      
-      # Overlay ACF lines from remaining chains
-      if (num.chains > 1) {
-        for (i in 2:num.chains) {
-          acf.chain <- acf(mcmc.chains[[i]][, s], plot = FALSE)
-          lines(acf.chain$lag, acf.chain$acf, col = i, lwd = 2)
-        }
-      }
-    }
-    mtext("ACF Plots for v", outer = TRUE, cex = 1.5)
-  } else {
-    mcmc <- nrow(mcmc.chains[[1]])
-    K  <- ncol(mcmc.chains[[1]])
-    
-    ## Loop over each entity and each dimension
-    par(mfrow = c(1, K), mar = c(2, 2, 4, 1), oma = c(2, 1, 2, 1))
-    
-    ## Loop over each dimension
-    for (k in 1:K) {
-      acf.base <- acf(mcmc.chains[[1]][, k], plot = FALSE)
-      plot(acf.base, main = paste0(name, "_", k), col = 1)
-      
-      # Overlay ACF lines from remaining chains
-      if (num.chains > 1) {
-        for (i in 2:num.chains) {
-          acf.chain <- acf(mcmc.chains[[i]][, k], plot = FALSE)
-          lines(acf.chain$lag, acf.chain$acf, col = i, lwd = 2)
-        }
-      }
-    }
-    mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
   }
 }
 
@@ -811,6 +1023,55 @@ stats.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
 
 
 
+###-------------------------------------###
+###        Check Label-Switching        ###
+###-------------------------------------###
+
+## INPUT:
+# num.chains:   Number of MCMC chains.
+# mcmc.chains:  A list of specific MCMC samples from each chain.
+# decimal:      Number of digits for rounding the results.
+# order.func:   Function that returns the component order for each draw
+
+## OUTPUT:
+# Creates a trace plot and heat map.
+# Prints Label-Switching diagnostics for the specified parameter.
+
+# Creates a 2 × num.chains panel: upper row = trace plot, lower row = heat-map.
+# Prints switch-rate for each chain.
+
+LabelSwitching.diag <- function(num.chains = 1, mcmc.chains, decimal = 4,
+                                order.func = function(x) order(x, decreasing = TRUE)) {
+  ## Preparation
+  mcmc <- dim(mcmc.chains[[1]])[1]
+  N <- dim(mcmc.chains[[1]])[2]
+  par(mfcol = c(2, num.chains), mar = c(4, 4, 2, 1), oma = c(0, 0, 3, 0))
+  cat("Label-Switching rate for worths parameters: \n")
+  
+  for (chain in 1:num.chains) {
+    # Compute the label-switching rate for the components
+    perm.mat <- t(apply(mcmc.chains[[chain]], 1, order.func))
+    change.vec  <- rowSums(perm.mat[-1, ] != perm.mat[-mcmc, ])
+    switch.rate <- mean(change.vec > 0)
+    
+    # Trace plot
+    matplot(mcmc.chains[[chain]], type = "l", lty = 1, col = rainbow(N),
+            xlab = "iteration", ylab = "w", main = "Trace of worths")
+    legend("topleft", legend = paste0("Entity", 1:N), col = rainbow(N), lty = 1, cex = .6)
+    
+    # Heat map of permutation
+    image(t(perm.mat), axes = FALSE, useRaster = TRUE, col = rainbow(N),
+          main = paste0("perm (chain ", chain, ")"))
+    axis(2, at = seq(0, 1, length.out = N),
+         labels = paste0("pos", 1:N), las = 2, cex.axis = .6)
+    
+    cat("Chain", chain, "=", round(switch.rate, decimal), "\n")
+  }
+}
+
+
+
+
 
 
 
@@ -885,48 +1146,44 @@ mcmc.extract <- function(chains, name, rhat = FALSE, ess = FALSE) {
 
 
 
-###-------------------------------------###
-###        Check Label-Switching        ###
-###-------------------------------------###
+###-------------------------------------------------------------------------###
+###        Apply sum-to-zero or reference-based centering constraint        ###
+###-------------------------------------------------------------------------###
 
 ## INPUT:
-# num.chains:   Number of MCMC chains.
-# mcmc.chains:  A list of specific MCMC samples from each chain.
-# decimal:      Number of digits for rounding the results.
-# order.func:   Function that returns the component order for each draw
+# x:          A vector that we want to transform (e.g., values of worths).
+# method:     A character string indicating the normalizing method ("center" or "reference").
+# reference:  A reference point used when method = "reference".
+#             Can be an index or a character name if x has names.
 
 ## OUTPUT:
-# Creates a trace plot and heat map.
-# Prints Label-Switching diagnostics for the specified parameter.
+# Returns a vector after centering transformation.
+# 修正予定 (識別条件のオプション化の際に利用する)
 
-# Creates a 2 × num.chains panel: upper row = trace plot, lower row = heat-map.
-# Prints switch-rate for each chain.
-
-LabelSwitching.diag <- function(num.chains = 1, mcmc.chains, decimal = 4,
-                                order.func = function(x) order(x, decreasing = TRUE)) {
-  ## Preparation
-  mcmc <- dim(mcmc.chains[[1]])[1]
-  N <- dim(mcmc.chains[[1]])[2]
-  par(mfcol = c(2, num.chains), mar = c(4, 4, 2, 1), oma = c(0, 0, 3, 0))
-  cat("Label-Switching rate for worths parameters: \n")
+normalization <- function(x, method = c("center", "reference"), reference = NULL) {
+  method <- match.arg(method)
   
-  for (chain in 1:num.chains) {
-    # Compute the label-switching rate for the components
-    perm.mat <- t(apply(mcmc.chains[[chain]], 1, order.func))
-    change.vec  <- rowSums(perm.mat[-1, ] != perm.mat[-mcmc, ])
-    switch.rate <- mean(change.vec > 0)
+  shift <- switch(
+    method,
+  
+    center = mean(x),
     
-    # Trace plot
-    matplot(mcmc.chains[[chain]], type = "l", lty = 1, col = rainbow(N),
-            xlab = "iteration", ylab = "w", main = "Trace of worths")
-    legend("topleft", legend = paste0("Entity", 1:N), col = rainbow(N), lty = 1, cex = .6)
-    
-    # Heat map of permutation
-    image(t(perm.mat), axes = FALSE, useRaster = TRUE, col = rainbow(N),
-          main = paste0("perm (chain ", chain, ")"))
-    axis(2, at = seq(0, 1, length.out = N),
-         labels = paste0("pos", 1:N), las = 2, cex.axis = .6)
-    
-    cat("Chain", chain, "=", round(switch.rate, decimal), "\n")
-  }
+    reference = {
+      if (is.null(reference)) stop("`reference` must be provided when method = 'reference'.")
+      
+      if (is.numeric(reference) && length(reference) == 1) {
+        x[reference]
+      } else if (is.character(reference) && !is.null(names(x))) {
+        if (!(reference %in% names(x))) {
+          stop(paste("Reference name", reference, "not found in names(x)."))
+        }
+        x[reference]
+        
+      } else {
+        stop("Invalid type for `reference`. Must be numeric index or character name.")
+      }
+    }
+  )
+  return(x - shift)
 }
+
