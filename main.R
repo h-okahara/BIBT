@@ -5,16 +5,17 @@
 
 source("libraries.R")
 source("functions.R")
-source("database.R", local = TRUE)
+source("database.R")
 
 # preparation
-X <- database$citations.9
-entities.name <- database$name.9
+X <- database$artificial.30
+# entities.name <- database$name.9
+entities.name <- paste0("Entity", 1:30)
 N <- length(entities.name)  # number of entities
-dimensionality <- 15
+dimensionality <- round(5 * log(30), 1)
 num.iter <- 30000
-num.burn <- num.iter/3
-alpha <- 2.5
+num.burn <- num.iter/6
+alpha <- 3
 
 ######################  END import & setting  ##################################
 
@@ -47,16 +48,18 @@ plot(citations.qv.sorted, levelNames = names.sorted)
 ###########################  BEGIN TDBT.Gibbs  #################################
 
 num.chains <- 1
-param.name <- "w"   # Options: (w, F.worths, V, worths)
+param.name <- "K"   # Options: (w, F.worths, V, worths)
 mcmc.results <- run.MCMCs(num.chains = num.chains, name = param.name, MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
                           X, K = dimensionality, mcmc = num.iter, burn = num.burn, 
-                          w0.prior = rep(1, dimensionality),
+                          thin = 1, epsilon = 1e-1, rate = 1,
+                          w0.prior = rep(1, dimensionality),  # seq(1, 0.01, length.out = dimensionality), 
                           S0.prior = diag(1, dimensionality), 
                           F.prior = matrix(0, nrow = dimensionality, ncol = N), 
                           V.prior = rep(3, dimensionality), alpha = alpha)
 
 ## Extract MCMC sample for specified parameter (name)
 specific.mcmc <- mcmc.extract(mcmc.results$all.mcmc, param.name, rhat = FALSE, ess = FALSE)
+
 
 ## Represent information for the posterior of specified parameter.
 plot.MCMCs(num.chains, specific.mcmc, param.name) # plot MCMC sample path
@@ -66,7 +69,7 @@ stats.posteriors(num.chains, specific.mcmc, param.name, decimal = 6) # compute t
 compute.CIs(num.chains, specific.mcmc, param.name, level = 0.95, decimal = 3, hpd = TRUE) # compute credible intervals
 
 ## Compare each MCMC chain
-plot.worths(num.chains, mcmc.results$all.mcmc, names = entities.name, partition = FALSE, order = "desc", level = 0.99)
+plot.worths(num.chains, mcmc.results$all.mcmc, names = entities.name, partition = FALSE, order = "desc", level = 1)
 stats.worths(num.chains, mcmc.results$all.mcmc, names = entities.name, partition = TRUE, order = "desc", decimal = 2)
 
 # Label-switching diagnosis
