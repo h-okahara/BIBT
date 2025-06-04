@@ -178,7 +178,7 @@ TDBT.Gibbs <- function(X, K = 100, mcmc = 10000, burn = 2000,
 
 ###------------------------------------------------------------###
 ###        Trans-Dimensional Bradley-Terry (TDBT) model        ###
-###               (Dimensionality Adaptation ver.)             ###
+###               (Dimensionality Adaption ver.)               ###
 ###------------------------------------------------------------###
 
 ## INPUT:
@@ -228,17 +228,13 @@ TDBT.Gibbs.adapt <- function(X, K0 = 100, mcmc = 10000, burn = 2000,
   Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
   omega <- rep(NA, num.pairs)
   
-  # hyperparameters for dimensionality decision
+  ## Hyperparameters for dimensionality decision
   a0 <- -1
   a1 <- -5e-4
   sample.idx <- 0
   
-  ## Vectors/matrices to store posterior samples
-  w.pos <- vector("list", mcmc - burn)
-  F.pos <- vector("list", mcmc - burn)
-  V.pos <- vector("list", mcmc - burn)
-  worths.pos <- matrix(0, nrow = mcmc-burn, ncol = N)
-  K.pos <- numeric(mcmc - burn) 
+  ## Vectors to store posterior samples K in burn-in period
+  K.pos <- numeric(burn)
   
   #=======================   BEGIN MCMC sampling   =============================
   for (iter in 1:mcmc) {
@@ -313,67 +309,154 @@ TDBT.Gibbs.adapt <- function(X, K0 = 100, mcmc = 10000, burn = 2000,
     tau <- cumprod(V)
     # ------------------------  END Updating  ----------------------------------
     
-    # -----------------  BEGIN Adjust Dimensionality ---------------------------
-    prob <- exp(a0 + a1*iter) # probability of adapting
-    uu = runif(1)
-    prop = rowSums(abs(F.worths) < epsilon)/N # proportion of elements in each row less than eps in magnitude
-    m_t = sum(prop >= rate)  # number of redundant columns
     
-    if (uu < prob) {
-      ## Decide whether to add a new dimension (birth) or remove inactive ones (death)
-      if (iter > 20 && m_t == 0 && all(prop < 0.995)) { # Birth
-        
-        if (K0 > K) {
-          K <- min(K + 1, K0)  # Update K
-          
-          w <- c(w, w0.prior[K])
-          F.worths <- rbind(F.worths, F.prior[K,])
-          Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
-          V <- c(V, V.prior[K])
-          alphas <- c(alphas, alphas0[K])
-          betas <- c(betas, betas0[K])
-          tau <- cumprod(V)
-
-          w0 <- c(w0, w0.prior[K])
-          S0 <- S0.inv <- diag(K)
-        }
-      } else { # Death
-        remove.idx <- prop < rate  # Dimensions to remove
-        
-        # Shrink negligible dimensions
-        if (K > m_t && m_t != 0) {
-          K <- max(K - m_t, 1)  # Update K
-          
-          w <- w[remove.idx]
-          F.worths <- F.worths[remove.idx, , drop = FALSE]
-          Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
-          V <- V[remove.idx]
-          alphas <- alphas[remove.idx]
-          betas <- betas[remove.idx]
-          tau <- cumprod(V) 
-          
-          w0 <- w0[remove.idx]
-          S0 <- S0[remove.idx, remove.idx]
-          S0.inv <- S0.inv[remove.idx, remove.idx]
-        }
-      }
-    }
-    # ------------------  END Adjust Dimensionality ----------------------------
-    
-    ## Remove location indeterminacy
-    # Here, either impose the sum-to-zero constraint or endpoint constraints.
-    row.means <- rowMeans(F.worths[, 1:N])
-    F.worths <- F.worths - row.means # centering
-    
-    ## Store posterior samples
-    if (iter > burn && iter %% thin == 0) {
+    if (iter > burn && iter %% thin == 0) {  # Store posterior samples
       sample.idx <- sample.idx + 1
       
-      w.pos[[sample.idx]] <- w
-      F.pos[[sample.idx]] <- F.worths 
-      V.pos[[sample.idx]] <- V
-      worths.pos[sample.idx, ] <- w %*% F.worths[, 1:N, drop = FALSE]
-      K.pos[sample.idx] <- K
+      ## Remove location indeterminacy
+      # Here, either impose the sum-to-zero constraint or endpoint constraints.
+      row.means <- rowMeans(F.worths[, 1:N])
+      F.worths <- F.worths - row.means # centering
+      
+      ## Store posterior samples
+      w.pos[iter-burn, ] <- w
+      F.pos[iter-burn, , ] <- F.worths
+      V.pos[iter-burn, ] <- V
+      worths.pos[iter-burn, ] <- w %*% F.worths[,1:N]
+    } else if (iter < burn) {
+      # -----------------  BEGIN Adjust Dimensionality -------------------------
+      prop = rowSums(abs(F.worths) < epsilon)/N # proportion of elements in each row less than eps in magnitude
+      m_t = sum(prop >= rate)  # number of redundant columns
+      
+      if (runif(1) < exp(a0 + a1*iter)) {
+        ## Decide whether to add a new dimension (birth) or remove inactive ones (death)
+        if (iter > 20 && m_t == 0) { # Birth
+          
+          if (K0 > K) {
+            K <- min(K + 1, K0)  # Update K
+            
+            w <- c(w, w0.prior[K])
+            F.worths <- rbind(F.worths, F.prior[K,])
+            Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+            V <- c(V, V.prior[K])
+            alphas <- c(alphas, alphas0[K])
+            betas <- c(betas, betas0[K])
+            tau <- cumprod(V)
+            
+            w0 <- c(w0, w0.prior[K])
+            S0 <- S0.inv <- diag(K)
+          }
+        } else { # Death
+          remove.idx <- prop < rate  # Dimensions to remove
+          
+          # Shrink negligible dimensions
+          if (K > m_t && m_t != 0) {
+            K <- max(K - m_t, 1)  # Update K
+            
+            w <- w[remove.idx]
+            F.worths <- F.worths[remove.idx, , drop = FALSE]
+            Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+            V <- V[remove.idx]
+            alphas <- alphas[remove.idx]
+            betas <- betas[remove.idx]
+            tau <- cumprod(V) 
+            
+            w0 <- w0[remove.idx]
+            S0 <- S0[remove.idx, remove.idx]
+            S0.inv <- S0.inv[remove.idx, remove.idx]
+          }
+        }
+      }
+      K.pos[iter] <- K  # Store optimal dimensionality
+      # ------------------  END Adjust Dimensionality --------------------------
+      
+      ## Remove location indeterminacy
+      ## Here, either impose the sum-to-zero constraint or endpoint constraints.
+      row.means <- rowMeans(F.worths[, 1:N])
+      F.worths <- F.worths - row.means # centering
+    } else if (iter == burn) {
+      # -----------------  BEGIN Adjust Dimensionality -------------------------
+      prop = rowSums(abs(F.worths) < epsilon)/N # proportion of elements in each row less than eps in magnitude
+      m_t = sum(prop >= rate)  # number of redundant columns
+      
+      if (runif(1) < exp(a0 + a1*iter)) {
+        ## Decide whether to add a new dimension (birth) or remove inactive ones (death)
+        if (iter > 50 && m_t == 0) { # Birth
+          
+          if (K0 > K) {
+            K <- min(K + 1, K0)  # Update K
+            
+            w <- c(w, w0.prior[K])
+            F.worths <- rbind(F.worths, F.prior[K,])
+            Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+            V <- c(V, V.prior[K])
+            alphas <- c(alphas, alphas0[K])
+            betas <- c(betas, betas0[K])
+            tau <- cumprod(V)
+            
+            w0 <- c(w0, w0.prior[K])
+            S0 <- S0.inv <- diag(K)
+          }
+        } else { # Death
+          remove.idx <- prop < rate  # Dimensions to remove
+          
+          # Shrink negligible dimensions
+          if (K > m_t && m_t != 0) {
+            K <- max(K - m_t, 1)  # Update K
+            
+            w <- w[remove.idx]
+            F.worths <- F.worths[remove.idx, , drop = FALSE]
+            Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+            V <- V[remove.idx]
+            alphas <- alphas[remove.idx]
+            betas <- betas[remove.idx]
+            tau <- cumprod(V) 
+            
+            w0 <- w0[remove.idx]
+            S0 <- S0[remove.idx, remove.idx]
+            S0.inv <- S0.inv[remove.idx, remove.idx]
+          }
+        }
+      }
+      K.pos[iter] <- K  # Store optimal dimensionality
+      K.optimal <- median(K.pos[1:iter])  # Determined dimensionality
+      # ------------------  END Adjust Dimensionality --------------------------
+      
+      ## Adjust dimensionality of each parameter
+      if (K.optimal > K) { # Birth
+        w <- c(w, w0.prior[(K+1):K.optimal])
+        F.worths <- rbind(F.worths, F.prior[(K+1):K.optimal,])
+        Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+        V <- c(V, V.prior[(K+1):K.optimal])
+        alphas <- c(alphas, alphas0[(K+1):K.optimal])
+        betas <- c(betas, betas0[(K+1):K.optimal])
+        tau <- cumprod(V)
+        
+        w0 <- c(w0, w0.prior[(K+1):K.optimal])
+        S0 <- S0.inv <- diag(K.optimal)
+      } else if (K.optimal < K) { # Death
+        w <- w[1:K.optimal]
+        F.worths <- F.worths[1:K.optimal, , drop = FALSE]
+        Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+        V <- V[1:K.optimal]
+        alphas <- alphas[1:K.optimal]
+        betas <- betas[1:K.optimal]
+        tau <- cumprod(V) 
+        
+        w0 <- w0[1:K.optimal]
+        S0 <- S0.inv <- diag(K.optimal)
+      }
+      
+      ## Remove location indeterminacy
+      ## Here, either impose the sum-to-zero constraint or endpoint constraints.
+      row.means <- rowMeans(F.worths[, 1:N])
+      F.worths <- F.worths - row.means # centering
+
+      w.pos <- matrix(0, nrow = mcmc-burn, ncol = K.optimal)
+      F.pos <- array(0, dim = c(mcmc-burn, K.optimal, N))
+      V.pos <- matrix(0, nrow = mcmc-burn, ncol = K.optimal)
+      worths.pos <- matrix(0, nrow = mcmc-burn, ncol = N)
+      K <- K.optimal
     }
   }
   #=======================   END MCMC sampling   ===============================
