@@ -7,15 +7,30 @@ source("libraries.R")
 source("functions.R")
 source("database.R")
 
-# preparation
-X <- database$artificial.30
-# entities.name <- database$name.9
-entities.name <- paste0("Entity", 1:30)
-N <- length(entities.name)  # number of entities
-dimensionality <- round(5 * log(30), 1)
+## Preparation
+# X <- database$artificial.10
+# entities.name <- database$artificial.name10
+# N <- length(entities.name)  # number of entities
+dimensionality <- 10 # round(5 * log(30), 1)
 num.iter <- 30000
-num.burn <- num.iter/6
-alpha <- 3
+num.burn <- num.iter/5
+alpha <- 5
+
+## For artificial data.
+## Compute means for each entity and each dimension
+N <- 10
+X <- database[[paste0("artificial.", N)]]
+entities.name <- database[[paste0("artificial.name", N)]]
+K0 <- database[[paste0("K0.true", N)]]
+out <- matrix(0, nrow = K0, ncol = N)
+for (k in 1:K0) {
+  worths.k <- database[[paste0("w.true", N)]][k] * database[[paste0("F.true", N)]][k, ]
+  worths.centered <- worths.k - mean(worths.k)
+  out[k,] <- round(worths.centered, 4)
+}
+rownames(out) <- paste("Dimension", 1:K0)
+colnames(out) <- entities.name
+out
 
 ######################  END import & setting  ##################################
 
@@ -48,18 +63,16 @@ plot(citations.qv.sorted, levelNames = names.sorted)
 ###########################  BEGIN TDBT.Gibbs  #################################
 
 num.chains <- 1
-param.name <- "K"   # Options: (w, F.worths, V, worths)
+param.name <- "F.worths"   # Options: (w, F.worths, V, worths)
 mcmc.results <- run.MCMCs(num.chains = num.chains, name = param.name, MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
                           X, K = dimensionality, mcmc = num.iter, burn = num.burn, 
-                          thin = 1, epsilon = 1e-1, rate = 1,
-                          w0.prior = rep(1, dimensionality),  # seq(1, 0.01, length.out = dimensionality), 
-                          S0.prior = diag(1, dimensionality), 
+                          thin = 1, epsilon = 2e-1, rate = 1,
+                          w0.prior = rep(1, dimensionality), S0.prior = diag(dimensionality), 
                           F.prior = matrix(0, nrow = dimensionality, ncol = N), 
-                          V.prior = rep(3, dimensionality), alpha = alpha)
+                          V.prior = rep(alpha, dimensionality), alpha = alpha)
 
 ## Extract MCMC sample for specified parameter (name)
 specific.mcmc <- mcmc.extract(mcmc.results$all.mcmc, param.name, rhat = FALSE, ess = FALSE)
-
 
 ## Represent information for the posterior of specified parameter.
 plot.MCMCs(num.chains, specific.mcmc, param.name) # plot MCMC sample path
@@ -70,7 +83,7 @@ compute.CIs(num.chains, specific.mcmc, param.name, level = 0.95, decimal = 3, hp
 
 ## Compare each MCMC chain
 plot.worths(num.chains, mcmc.results$all.mcmc, names = entities.name, partition = FALSE, order = "desc", level = 1)
-stats.worths(num.chains, mcmc.results$all.mcmc, names = entities.name, partition = TRUE, order = "desc", decimal = 2)
+stats.worths(num.chains, mcmc.results$all.mcmc, names = entities.name, partition = TRUE, order = NULL, decimal = 2)
 
 # Label-switching diagnosis
 LabelSwitching.diag(num.chains, mcmc.extract(mcmc.results$all.mcmc, name = "worths"))

@@ -8,184 +8,6 @@
 # K0:       The dimensionality of the "worth" vector f;
 # mcmc:     Number of iterations;
 # burn:     Burn-in period;
-# w0.prior: A K×1 vector representing the relative weight of each dimension in f;
-# S0.prior: A K×K matrix representing covariance matrix of weight vector;
-# F.prior:  A K×N matrix where each column f_i represents the worth vector of player i;
-# V.prior:  A K×1 vector where each value v_s (except v_1 = 1) follows a truncated Gamma distribution;
-#           in the range [1,ingty) with Ga(alpha, 1) distribution;
-# alpha:    A hyperparameter of the truncated Gamma distribution;
-
-## OUTPUT:
-# A matrix of MCMC samples for the parameters: omega, w, F, V.
-
-TDBT.Gibbs <- function(X, K = 100, mcmc = 10000, burn = 2000, 
-                       w0.prior = rep(1, 100), S0.prior = diag(1, 100), 
-                       F.prior = matrix(0, nrow = 100, ncol = N),
-                       V.prior = rep(2, 100), alpha = 2) {
-  ## Preparation
-  entity.name <- unique(c(X[ ,1], X[ ,2]))
-  N <- length(entity.name)       # number of entities
-  entity.index <- setNames(1:N, entity.name)
-  pairs <- cbind(entity.index[X[ ,1]], entity.index[X[ ,2]])
-  rownames(pairs) <- NULL 
-  num.pairs <- nrow(pairs)    # number of unique (i, j) pairs
-  if(num.pairs!=nrow(X)){stop("Number of pairs is not equal to the length of X")}
-  
-  ## Initial values
-  w0 <- w <- w0.prior
-  S0 <- S0.prior
-  S0.inv <- solve(S0)
-  F.worths <- F.prior
-  V <- V.prior
-  V[1] <- 1
-  tau <- cumprod(V)
-  alphas <- alphas0 <- rep(alpha, K)
-  betas <- betas0 <- rep(1, K)
-  kappa <- X$y_ij - X$n_ij/2
-  Phi <- matrix(NA, nrow = K, ncol = num.pairs)
-  Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
-  omega <- rep(NA, num.pairs)
-  
-  ## Vectors/matrices to store posterior samples
-  w.pos <- matrix(0, nrow = mcmc, ncol = K)
-  F.pos <- array(0, dim = c(mcmc, K, N))
-  V.pos <- matrix(0, nrow = mcmc, ncol = K)
-  worths.pos <- matrix(0, nrow = mcmc, ncol = N)
-  
-  #=======================   BEGIN MCMC sampling   =============================
-  for (iter in 1:mcmc) {
-    # -----------------------  BEGIN Updating  ---------------------------------
-    ## Updating omega
-    for (p in 1:num.pairs) {
-      omega[p] <- rpg(n = 1, h = X$n_ij[p], z = sum(w * Phi[p, ]))  # sample omega[p] from Pólya-Gamma distribution
-    }
-    
-    ## Updating w
-    inv.part <- tryCatch({
-      solve(diag(1/omega) + Phi %*% S0 %*% t(Phi))
-    }, error = function(e) {
-      message("Error in computing inverse matrix in A.omega: ", e$message)
-      return(NULL)
-    })
-    A.omega <- S0 - S0 %*% t(Phi) %*% inv.part %*% Phi %*% S0  # Woodbury formula
-    B.omega <- t(Phi) %*% kappa + S0.inv %*% w0
-    w.mean <- as.vector(A.omega %*% B.omega)
-    w.Sigma <- A.omega
-    # w <- mvrnorm(1, mu = w.mean, Sigma = w.Sigma)
-    
-    for(k in 1:K){
-      idx <- setdiff(1:K, k)
-      inv.part <- tryCatch({
-        solve(w.Sigma[idx, idx])
-      }, error = function(e) {
-        message("Error in computing inverse matrix in", k,"th off-diagonal block: ", e$message)
-        return(NULL)
-      })
-      mu.cond <- w.mean[k] + w.Sigma[k, idx] %*% inv.part %*% (w[idx] - w.mean[idx])
-      var.cond <- w.Sigma[k, k] - w.Sigma[k, idx] %*% inv.part %*% w.Sigma[idx, k]
-      
-      # Sampling from the truncated Normal distribution
-      if (iter != 1) {
-        lower <- if (k == K) 0 else w[k+1]
-        upper <- if (k == 1) Inf else w[k-1] 
-      } else {
-        lower <- 0
-        upper <- if (k == 1) Inf else w[k-1]
-      }
-      w[k] <- rtnorm(n = 1, mu = as.numeric(mu.cond), sd = sqrt(var.cond),
-                     lb = lower, ub = upper)
-    }
-    
-    ## Updating f_i for i = 1,...,N
-    omega_i <- numeric(N)
-    eta_i <- numeric(N)
-    
-    # i = 1
-    idx_1 <- which(pairs[,1] == 1)
-    omega_i[1] <- sum(omega[idx_1])
-    eta_i[1] <- sum(kappa[idx_1] + omega[idx_1] * (t(w) %*% F.worths[, pairs[idx_1, 2]]))
-    
-    # i = N
-    idx_N <- which(pairs[,2] == N)
-    omega_i[N] <- sum(omega[idx_N])
-    eta_i[N] <- -sum(kappa[idx_N] - omega[idx_N] * (t(w) %*% F.worths[, pairs[idx_N, 1]]))
-    
-    # i = 2,...,N-1
-    for (i in 2:(N-1)) {
-      upper.idx <- which(pairs[, 1] == i)  # i<j
-      omega_i[i] <- omega_i[i] + sum(omega[upper.idx])
-      eta_i[i] <- eta_i[i] + sum(kappa[upper.idx] + omega[upper.idx] * (t(w) %*% F.worths[, pairs[upper.idx, 2]]))
-      
-      lower.idx <- which(pairs[, 2] == i)  # j<i
-      omega_i[i] <- omega_i[i] + sum(omega[lower.idx])
-      eta_i[i] <- eta_i[i] - sum(kappa[lower.idx] - omega[lower.idx] * (t(w) %*% F.worths[, pairs[lower.idx, 1]]))
-    }
-    
-    for (i in 1:N) {
-      tau.inv <- diag(1/tau,K,K)
-      denom <- 1/omega_i[i] + t(w) %*% tau.inv %*% w
-      A_f <- tau.inv - (1/as.numeric(denom)) * (tau.inv %*% w %*% t(w) %*% tau.inv)  # Woodbury formula
-      B_f <- eta_i[i] * w
-      f_i.mean <- as.vector(A_f %*% B_f)
-      f_i.Sigma <- A_f
-      F.worths[ ,i] <- mvrnorm(1, mu = f_i.mean, Sigma = f_i.Sigma)
-    }
-    
-    ## Updating Phi
-    Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
-    
-    ## Updating v_s and tau_s for s = 2,...,K
-    sq.F_k <- rowSums(F.worths^2)
-    alphas[2:K] <- alphas0[2:K] + (N/2) * (K-(2:K)+1)
-    betas[2:K] <- sapply(2:K, function(s) {
-      betas0[s] + 0.5 * sum(tau[s:K] / V[s] * sq.F_k[s:K])
-    })
-    
-    # Sampling from the truncated Gamma distribution
-    for (s in 2:K) {
-      V[s] <- rtrunc(n = 1, spec = "gamma", a = 1, b = Inf, shape = alphas[s], rate = betas[s])
-    }
-    tau <- cumprod(V)
-    # ------------------------  END Updating  ----------------------------------
-    ## Remove location indeterminacy
-    # Here, either impose the sum-to-zero constraint or endpoint constraints.
-    row.means <- rowMeans(F.worths[, 1:N])
-    F.worths <- F.worths - row.means # centering
-    # worths <- w %*% F.worths[,1:N]
-    # shift  <- (mean(worths) / sum(w^2)) * w
-    # F.worths <- F.worths - shift  # centering
-    
-    ## Store posterior samples
-    w.pos[iter, ] <- w
-    F.pos[iter, , ] <- F.worths
-    V.pos[iter, ] <- V
-    worths.pos[iter, ] <- w %*% F.worths[,1:N]
-  }
-  #=======================   END MCMC sampling   ===============================
-  
-  ## Summary
-  om <- 1:burn
-  w.pos <- w.pos[-om, ]
-  F.pos <- F.pos[-om, , ]
-  V.pos <- V.pos[-om, ]
-  worths.pos <- worths.pos[-om, ]
-  result <- list(w = w.pos, F.worths = F.pos, V = V.pos, worths = worths.pos)
-  return(result)
-}
-
-
-
-
-###------------------------------------------------------------###
-###        Trans-Dimensional Bradley-Terry (TDBT) model        ###
-###               (Dimensionality Adaption ver.)               ###
-###------------------------------------------------------------###
-
-## INPUT:
-# X:        An N×N matrix where the (i, j) entry indicates that player i defeats player j;
-# K0:       The dimensionality of the "worth" vector f;
-# mcmc:     Number of iterations;
-# burn:     Burn-in period;
 # thin:     A thinning interval;
 # epsilon:  threshold below which a dimension is considered negligible;
 # w0.prior: A K×1 vector representing the relative weight of each dimension in f;
@@ -198,11 +20,10 @@ TDBT.Gibbs <- function(X, K = 100, mcmc = 10000, burn = 2000,
 ## OUTPUT:
 # A list of MCMC samples for the parameters: omega, w, F, V.
 
-TDBT.Gibbs.adapt <- function(X, K0 = 100, mcmc = 10000, burn = 2000, 
-                             thin = 1, epsilon = 1e-3, rate = 1,
-                             w0.prior = rep(1, 100), S0.prior = diag(1, 100), 
-                             F.prior = matrix(0, nrow = 100, ncol = N),
-                             V.prior = rep(2, 100), alpha = 2) {
+TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000, 
+                       thin = 1, epsilon = 1e-3, rate = 1,
+                       w0.prior = NULL, S0.prior = NULL, F.prior = NULL, 
+                       V.prior = NULL, alpha = 3) {
   ## Preparation
   entity.name <- unique(c(X[ ,1], X[ ,2]))
   N <- length(entity.name)       # number of entities
@@ -225,7 +46,7 @@ TDBT.Gibbs.adapt <- function(X, K0 = 100, mcmc = 10000, burn = 2000,
   betas <- betas0 <- rep(1, K0)
   kappa <- X$y_ij - X$n_ij/2
   Phi <- matrix(NA, nrow = K, ncol = num.pairs)
-  Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+  Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
   omega <- rep(NA, num.pairs)
   
   ## Hyperparameters for dimensionality decision
@@ -256,73 +77,77 @@ TDBT.Gibbs.adapt <- function(X, K0 = 100, mcmc = 10000, burn = 2000,
     w.mean <- as.vector(A.omega %*% B.omega)
     w.Sigma <- A.omega
     w <- mvrnorm(1, mu = w.mean, Sigma = w.Sigma)
-
+    
     ## Updating f_i for i = 1,...,N
-    omega_i <- numeric(N)
-    eta_i <- numeric(N)
-    
-    # i = 1
-    idx_1 <- which(pairs[,1] == 1)
-    omega_i[1] <- sum(omega[idx_1])
-    eta_i[1] <- sum(kappa[idx_1] + omega[idx_1] * (t(w) %*% F.worths[, pairs[idx_1, 2]]))
-    
-    # i = N
-    idx_N <- which(pairs[,2] == N)
-    omega_i[N] <- sum(omega[idx_N])
-    eta_i[N] <- -sum(kappa[idx_N] - omega[idx_N] * (t(w) %*% F.worths[, pairs[idx_N, 1]]))
-    
-    # i = 2,...,N-1
-    for (i in 2:(N-1)) {
-      upper.idx <- which(pairs[, 1] == i)  # i<j
-      omega_i[i] <- omega_i[i] + sum(omega[upper.idx])
-      eta_i[i] <- eta_i[i] + sum(kappa[upper.idx] + omega[upper.idx] * (t(w) %*% F.worths[, pairs[upper.idx, 2]]))
-      
-      lower.idx <- which(pairs[, 2] == i)  # j<i
-      omega_i[i] <- omega_i[i] + sum(omega[lower.idx])
-      eta_i[i] <- eta_i[i] - sum(kappa[lower.idx] - omega[lower.idx] * (t(w) %*% F.worths[, pairs[lower.idx, 1]]))
-    }
-    
     for (i in 1:N) {
-      tau.inv <- diag(1/tau,K,K)
-      denom <- 1/omega_i[i] + t(w) %*% tau.inv %*% w
-      A_f <- tau.inv - (1/as.numeric(denom)) * (tau.inv %*% w %*% t(w) %*% tau.inv)  # Woodbury formula
-      B_f <- eta_i[i] * w
-      f_i.mean <- as.vector(A_f %*% B_f)
-      f_i.Sigma <- A_f
-      F.worths[ ,i] <- mvrnorm(1, mu = f_i.mean, Sigma = f_i.Sigma)
+      # Compute omega_i and eta_i using the current state
+      up.idx   <- which(pairs[, 1] == i)  # i<j
+      down.idx <- which(pairs[, 2] == i)  # j<i
+      omega_i  <- sum(omega[c(up.idx, down.idx)])
+
+      eta_i <- 0
+      if (length(up.idx)) { # i<j
+        eta_i <- eta_i + sum(kappa[up.idx] +
+                               omega[up.idx] * (t(w) %*% F.worths[, pairs[up.idx, 2], drop = FALSE])) 
+      }
+      if (length(down.idx)) { # j<i
+        eta_i <- eta_i - sum(kappa[down.idx] -
+                               omega[down.idx] * (t(w) %*% F.worths[, pairs[down.idx, 1], drop = FALSE]))
+      }
+      
+      ## Draw f_i ~ N(A_f B_f, A_f)
+      tau.inv <- diag(1 / tau, K, K)
+      denom  <- (1 / omega_i) + t(w) %*% tau.inv %*% w
+      A_f    <- tau.inv - (tau.inv %*% w %*% t(w) %*% tau.inv) / as.numeric(denom)
+      B_f    <- eta_i * w
+      F.worths[, i] <- mvrnorm(1, mu = as.vector(A_f %*% B_f), Sigma = A_f)
     }
     
     ## Updating Phi
-    Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+    Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
     
     ## Updating v_s and tau_s for s = 2,...,K
-    sq.F_k <- rowSums(F.worths^2)
-    alphas[2:K] <- alphas0[2:K] + (N/2) * (K-(2:K)+1)
-    betas[2:K] <- sapply(2:K, function(s) {
-      betas0[s] + 0.5 * sum(tau[s:K] / V[s] * sq.F_k[s:K])
-    })
-    
-    # Sampling from the truncated Gamma distribution
-    for (s in 2:K) {
-      V[s] <- rtrunc(n = 1, spec = "gamma", a = 1, b = Inf, shape = alphas[s], rate = betas[s])
+    if (K > 1) {
+      sq.F_k <- rowSums(F.worths^2)
+      alphas[2:K] <- alphas0[2:K] + (N/2) * (K-(2:K)+1)
+      
+      # Sampling from the truncated Gamma distribution
+      for (s in 2:K) {
+        betas[s] <- betas0[s] + 0.5 * sum(tau[s:K] / V[s] * sq.F_k[s:K])
+        V[s] <- rtrunc(n = 1, spec = "gamma", a = 1, b = Inf, 
+                       shape = alphas[s], rate = betas[s])
+        tau <- cumprod(V)
+      }
+    } else if (K == 1) {
+      alphas <- alphas[1]
+      betas <- betas[1]
+      V <- tau <- 1
     }
-    tau <- cumprod(V)
     # ------------------------  END Updating  ----------------------------------
     
-    
-    if (iter > burn && iter %% thin == 0) {  # Store posterior samples
+    if (iter > burn && (iter-burn) %% thin == 0) {  # Store posterior samples
       sample.idx <- sample.idx + 1
       
       ## Remove location indeterminacy
       # Here, either impose the sum-to-zero constraint or endpoint constraints.
-      row.means <- rowMeans(F.worths[, 1:N])
+      row.means <- rowMeans(F.worths[, 1:N, drop = FALSE])
       F.worths <- F.worths - row.means # centering
       
+      ## Sign of components in w turns to be positive
+      signs <- sign(w)
+      w.sorted <- abs(w)
+      F.sorted <- F.worths * matrix(signs, nrow = K, ncol = N, byrow = FALSE)
+      
+      ## Apply permutations for identifiability
+      # order.desc <- order(w.sorted, decreasing = TRUE)
+      # w.sorted <- w.sorted[order.desc]
+      # F.sorted <- F.sorted[order.desc, , drop = FALSE]
+
       ## Store posterior samples
-      w.pos[iter-burn, ] <- w
-      F.pos[iter-burn, , ] <- F.worths
-      V.pos[iter-burn, ] <- V
-      worths.pos[iter-burn, ] <- w %*% F.worths[,1:N]
+      w.pos[sample.idx, ] <- w.sorted
+      F.pos[sample.idx, , ] <- F.sorted
+      V.pos[sample.idx, ] <- V
+      worths.pos[sample.idx, ] <- w.sorted %*% F.sorted[,1:N]
     } else if (iter < burn) {
       # -----------------  BEGIN Adjust Dimensionality -------------------------
       prop = rowSums(abs(F.worths) < epsilon)/N # proportion of elements in each row less than eps in magnitude
@@ -331,13 +156,12 @@ TDBT.Gibbs.adapt <- function(X, K0 = 100, mcmc = 10000, burn = 2000,
       if (runif(1) < exp(a0 + a1*iter)) {
         ## Decide whether to add a new dimension (birth) or remove inactive ones (death)
         if (iter > 20 && m_t == 0) { # Birth
-          
           if (K0 > K) {
             K <- min(K + 1, K0)  # Update K
             
             w <- c(w, w0.prior[K])
             F.worths <- rbind(F.worths, F.prior[K,])
-            Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+            Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
             V <- c(V, V.prior[K])
             alphas <- c(alphas, alphas0[K])
             betas <- c(betas, betas0[K])
@@ -355,7 +179,7 @@ TDBT.Gibbs.adapt <- function(X, K0 = 100, mcmc = 10000, burn = 2000,
             
             w <- w[remove.idx]
             F.worths <- F.worths[remove.idx, , drop = FALSE]
-            Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+            Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
             V <- V[remove.idx]
             alphas <- alphas[remove.idx]
             betas <- betas[remove.idx]
@@ -367,13 +191,20 @@ TDBT.Gibbs.adapt <- function(X, K0 = 100, mcmc = 10000, burn = 2000,
           }
         }
       }
+      
       K.pos[iter] <- K  # Store optimal dimensionality
+      
       # ------------------  END Adjust Dimensionality --------------------------
       
       ## Remove location indeterminacy
       ## Here, either impose the sum-to-zero constraint or endpoint constraints.
-      row.means <- rowMeans(F.worths[, 1:N])
-      F.worths <- F.worths - row.means # centering
+      if (K > 1) {
+        row.means <- rowMeans(F.worths[, 1:N])
+        F.worths <- F.worths - row.means # centering
+      } else if (K == 1) {
+        row.means <- mean(F.worths[, 1:N])
+        F.worths <- F.worths - row.means # centering
+      }
     } else if (iter == burn) {
       # -----------------  BEGIN Adjust Dimensionality -------------------------
       prop = rowSums(abs(F.worths) < epsilon)/N # proportion of elements in each row less than eps in magnitude
@@ -381,14 +212,13 @@ TDBT.Gibbs.adapt <- function(X, K0 = 100, mcmc = 10000, burn = 2000,
       
       if (runif(1) < exp(a0 + a1*iter)) {
         ## Decide whether to add a new dimension (birth) or remove inactive ones (death)
-        if (iter > 50 && m_t == 0) { # Birth
-          
+        if (m_t == 0) { # Birth
           if (K0 > K) {
             K <- min(K + 1, K0)  # Update K
             
             w <- c(w, w0.prior[K])
             F.worths <- rbind(F.worths, F.prior[K,])
-            Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+            Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
             V <- c(V, V.prior[K])
             alphas <- c(alphas, alphas0[K])
             betas <- c(betas, betas0[K])
@@ -406,7 +236,7 @@ TDBT.Gibbs.adapt <- function(X, K0 = 100, mcmc = 10000, burn = 2000,
             
             w <- w[remove.idx]
             F.worths <- F.worths[remove.idx, , drop = FALSE]
-            Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
+            Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
             V <- V[remove.idx]
             alphas <- alphas[remove.idx]
             betas <- betas[remove.idx]
@@ -418,6 +248,7 @@ TDBT.Gibbs.adapt <- function(X, K0 = 100, mcmc = 10000, burn = 2000,
           }
         }
       }
+      
       K.pos[iter] <- K  # Store optimal dimensionality
       K.optimal <- median(K.pos[1:iter])  # Determined dimensionality
       # ------------------  END Adjust Dimensionality --------------------------
@@ -449,13 +280,15 @@ TDBT.Gibbs.adapt <- function(X, K0 = 100, mcmc = 10000, burn = 2000,
       
       ## Remove location indeterminacy
       ## Here, either impose the sum-to-zero constraint or endpoint constraints.
-      row.means <- rowMeans(F.worths[, 1:N])
+      row.means <- rowMeans(F.worths[, 1:N, drop = FALSE])
       F.worths <- F.worths - row.means # centering
-
-      w.pos <- matrix(0, nrow = mcmc-burn, ncol = K.optimal)
-      F.pos <- array(0, dim = c(mcmc-burn, K.optimal, N))
-      V.pos <- matrix(0, nrow = mcmc-burn, ncol = K.optimal)
-      worths.pos <- matrix(0, nrow = mcmc-burn, ncol = N)
+      
+      ## Define matrices for posterior samples
+      mcmc.row <- ((mcmc-burn) - (mcmc-burn) %% thin) / thin
+      w.pos <- matrix(0, nrow = mcmc.row, ncol = K.optimal)
+      F.pos <- array(0, dim = c(mcmc.row, K.optimal, N))
+      V.pos <- matrix(0, nrow = mcmc.row, ncol = K.optimal)
+      worths.pos <- matrix(0, nrow = mcmc.row, ncol = N)
       K <- K.optimal
     }
   }
@@ -473,38 +306,38 @@ TDBT.Gibbs.adapt <- function(X, K0 = 100, mcmc = 10000, burn = 2000,
 ###--------------------------------------------------###
 
 ## INPUT:
-# num.chains: Number of independent MCMC chains to run.
-# name:       A string representing the name of parameters.
-# MCMC.plot   Logical flag; if TRUE, print MCMC sample paths for the specified parameters.
-# rhat:       Logical flag; if TRUE, compute and print Rhat values.
-# ess:        Logical flag; if TRUE, compute and print Effective Sample Size (ESS).
-# X:          An N×N matrix where the (i, j) entry indicates that player i defeats player j.
-# K:          The dimensionality of the "worth" vector f.
-# w:          A K×1 vector representing the relative weight of each dimension in f.
-# F:          A K×N matrix where each column f_i represents the worth vector of player i.
-# V:          A K×1 vector where each value v_s (except v_1 = 1) follows a truncated Gamma distribution 
-#             in the range [1,ingty) with Ga(alpha, 1) distribution.
-# alpha:      A hyperparameter of the truncated Gamma distribution
+# num.chains: Number of independent MCMC chains to run;
+# name:       A string representing the name of parameters;
+# MCMC.plot   Logical flag; if TRUE, print MCMC sample paths for the specified parameters;
+# rhat:       Logical flag; if TRUE, compute and print Rhat values;
+# ess:        Logical flag; if TRUE, compute and print Effective Sample Size (ESS);
+# X:          An N×N matrix where the (i, j) entry indicates that player i defeats player j;
+# K:          The dimensionality of the "worth" vector f;
+# w:          A K×1 vector representing the relative weight of each dimension in f;
+# F:          A K×N matrix where each column f_i represents the worth vector of player i;
+# V:          A K×1 vector where each value v_s (except v_1 = 1) follows a truncated Gamma distribution ;
+#             in the range [1,ingty) with Ga(alpha, 1) distribution;
+# alpha:      A hyperparameter of the truncated Gamma distribution;
 
 ## OUTPUT:
 # A list of MCMC draws from multiple chains.
 
 run.MCMCs <- function(num.chains = 1, name, MCMC.plot = TRUE, rhat = FALSE, ess = FALSE,
-                      X, K = 3, mcmc = 10000, burn = 2000, 
-                      thin = 1, epsilon = 1e-3, rate = 1,
-                      w0.prior = rep(1, 3), S0.prior = diag(1, 3), 
-                      F.prior = matrix(0, nrow = 3, ncol = 4), 
-                      V.prior = rep(1, 3), alpha = 2) {
+                      X, K = 100, mcmc = 10000, burn = 2000, 
+                      thin = 1, epsilon = 1e-1, rate = 1,
+                      w0.prior = rep(1, 100), S0.prior = diag(100), 
+                      F.prior = matrix(0, nrow = 100, ncol = NULL), 
+                      V.prior = rep(1, 100), alpha = 3) {
   start.time <- Sys.time()
   
   ## Run multiple MCMC chains
   if (K > 1) {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(73 + chain.id)
-      TDBT.Gibbs.adapt(X, K = K, mcmc = mcmc, burn = burn,
-                       thin = thin, epsilon = epsilon, rate = rate,
-                       w0.prior = w0.prior, S0.prior = S0.prior, 
-                       F.prior = F.prior, V.prior = V.prior, alpha = alpha)
+      TDBT.Gibbs(X, K = K, mcmc = mcmc, burn = burn,
+                 thin = thin, epsilon = epsilon, rate = rate,
+                 w0.prior = w0.prior, S0.prior = S0.prior, 
+                 F.prior = F.prior, V.prior = V.prior, alpha = alpha)
     }, mc.cores = min(num.chains, parallel::detectCores()-1)) 
   } else {
     stop("Dimensionality must be K > 1")
@@ -534,9 +367,9 @@ run.MCMCs <- function(num.chains = 1, name, MCMC.plot = TRUE, rhat = FALSE, ess 
 ###---------------------------------###
 
 ## INPUT:
-# num.chains:   Number of MCMC chains.
-# mcmc.chains:  A list of specific MCMC samples from each chain.
-# name:         A string representing the name of parameters.
+# num.chains:   Number of MCMC chains;
+# mcmc.chains:  A list of specific MCMC samples from each chain;
+# name:         A string representing the name of parameters;
 
 ## OUTPUT:
 # Overlayed trace plots (sample paths) for each parameter.
@@ -569,7 +402,7 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains, name) {
     N <- dim(mcmc.chains[[1]])[3]
     
     ## Set up the plotting area
-    par(mfrow = c(N, K), mar = c(2, 2, 2, 1), oma = c(1, 1, 2, 1))
+    par(mfrow = c(N, K), mar = c(1, 1, 1, 1), oma = c(1, 1, 2, 1))
     
     ## Loop over each dimension to plot MCMC paths
     for (e in 1:N) {
@@ -597,10 +430,10 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains, name) {
 ###-----------------------------------###
 
 ## INPUT:
-# num.chains:   Number of MCMC chains.
-# mcmc.chains:  A list of specific MCMC samples from each chain.
-# name:         A string representing the name of the parameter.
-# bins:         Number of bins for the histogram.
+# num.chains:   Number of MCMC chains;
+# mcmc.chains:  A list of specific MCMC samples from each chain;
+# name:         A string representing the name of the parameter;
+# bins:         Number of bins for the histogram;
 
 ## OUTPUT:
 # Histograms with density curves for each parameter, overlaying traces from all chains.
@@ -612,7 +445,7 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, bins = 30) {
     N <- dim(mcmc.chains[[1]])[3]
     
     ## Set up the plotting area
-    par(mfrow = c(N, K), mar = c(2, 2, 2, 1), oma = c(1, 1, 2, 1))
+    par(mfrow = c(N, K), mar = c(1, 1, 1, 1), oma = c(1, 1, 2, 1))
     
     ## Loop over each entity and each dimension to plot histograms
     for (e in 1:N) {
@@ -688,9 +521,9 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, bins = 30) {
 ###--------------------------------------------###
 
 ## INPUT:
-# num.chains:   Number of MCMC chains.
-# mcmc.chains:  A list of specific MCMC samples from each chain.
-# param.name:   A string representing the name of parameters.
+# num.chains:   Number of MCMC chains;
+# mcmc.chains:  A list of specific MCMC samples from each chain;
+# param.name:   A string representing the name of parameters;
 
 ## OUTPUT:
 # For each chain, prints a data frame of posterior statistics (mean and median) for each parameter.
@@ -741,9 +574,9 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, param.name, decimal = 
 ###-----------------------------------------###
 
 ## INPUT:
-# num.chains:   Number of MCMC chains.
-# mcmc.chains:  A list of specific MCMC samples from each chain.
-# name:         A string representing the name of the parameter.
+# num.chains:   Number of MCMC chains;
+# mcmc.chains:  A list of specific MCMC samples from each chain;
+# name:         A string representing the name of the parameter;
 
 ## OUTPUT:
 # Plots the autocorrelation function (ACF) for the given MCMC samples, overlaying results from all chains.
@@ -826,12 +659,12 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name) {
 ###------------------------------------------###
 
 ## INPUT:
-# num.chains:   Number of MCMC chains.
-# mcmc.chains:  A list of specific MCMC samples from each chain.
-# name:         A string representing the name of the parameter.
-# level:        The credible interval level (e.g., 0.95).
-# decimal:      Number of digits for rounding the results.
-# hpd:          Logical flag; if TRUE, return the Highest Posterior Density (HPD) interval.
+# num.chains:   Number of MCMC chains;
+# mcmc.chains:  A list of specific MCMC samples from each chain;
+# name:         A string representing the name of the parameter;
+# level:        The credible interval level (e.g., 0.95);
+# decimal:      Number of digits for rounding the results;
+# hpd:          Logical flag; if TRUE, return the Highest Posterior Density (HPD) interval;
 
 ## OUTPUT:
 # For each chain, prints the credible intervals (lower and upper bounds) for each parameter.
@@ -921,12 +754,12 @@ compute.CIs <- function(num.chains = 1, mcmc.chains, name, level = 0.95, decimal
 ###-----------------------------------------###
 
 ## INPUT:
-# num.chains:  Number of MCMC chains.
-# chains:      A list of complete MCMC samples from each chain.
-# names:       Optional vector of entity names. If NULL, numeric labels are used.
-# partition:   Logical flag; if TRUE, represent contributions for each entity and each dimension.
-# order:       Ordering flag to change the order of entities. (e.g., "asc" and "desc")
-# level:       The visible interval level (e.g., 0.95).
+# num.chains:  Number of MCMC chains;
+# chains:      A list of complete MCMC samples from each chain;
+# names:       Optional vector of entity names. If NULL, numeric labels are used;
+# partition:   Logical flag; if TRUE, represent contributions for each entity and each dimension;
+# order:       Ordering flag to change the order of entities (e.g., "asc" and "desc");
+# level:       The visible interval level (e.g., 0.95);
 
 ## OUTPUT:
 # Creates a grouped violin plot for each latent dimension's contribution.
@@ -1040,12 +873,12 @@ plot.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
 ###--------------------------------------###
 
 ## INPUT:
-# num.chains:  Number of MCMC chains.
-# chains:      A list of complete MCMC samples from each chain.
-# names:       Optional vector of entity names. If NULL, numeric labels are used.
-# partition:   Logical flag; if TRUE, represent contributions for each entity and each dimension.
-# order:       Ordering flag to change the order of entities. (e.g., "asc" and "desc")
-# level:       The visible interval level (e.g., 0.95).
+# num.chains:  Number of MCMC chains;
+# chains:      A list of complete MCMC samples from each chain;
+# names:       Optional vector of entity names. If NULL, numeric labels are used;
+# partition:   Logical flag; if TRUE, represent contributions for each entity and each dimension;
+# order:       Ordering flag to change the order of entities (e.g., "asc" and "desc");
+# level:       The visible interval level (e.g., 0.95);
 
 ## OUTPUT:
 # For each chain, prints a data frame of posterior statistics (mean and median)
@@ -1072,7 +905,7 @@ stats.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
       # Compute means for each entity and each dimension
       for (k in 1:K) {
         chain.worths <- chain.w[, k] * chain.F.worths[, k, ]
-        chain.worths <- chain.worths - mean(chain.worths[, N])
+        chain.worths <- chain.worths - rowMeans(chain.worths)
         out[k,] <- round(colMeans(chain.worths), decimal)
       }
       rownames(out) <- paste("Dimension", 1:K)
@@ -1082,7 +915,7 @@ stats.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
   } else {
     for (chain in 1:num.chains) {
       chain.worths <- chains[[chain]]$worths
-      chain.worths <- chain.worths - mean(chain.worths[, N])
+      chain.worths <- chain.worths - rowMeans(chain.worths)
       means <- round(colMeans(chain.worths), decimal)
       out <- matrix(means, nrow = 1)
       rownames(out) <- paste("Chain", chain)
@@ -1093,12 +926,14 @@ stats.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
   
   ## Get sorting entities in descending or ascending order.
   for (chain in 1:num.chains) {
-    sorting_index <- if (order == "desc") {
-      order(means.list[[chain]][1, ], decreasing = TRUE)
-    } else if (order == "asc") {
-      order(means.list[[chain]][1, ], decreasing = FALSE)
+    if (!is.null(order)) {
+      sorting_index <- if (order == "desc") {
+        order(means.list[[chain]][1, ], decreasing = TRUE)
+      } else if (order == "asc") {
+        order(means.list[[chain]][1, ], decreasing = FALSE)
+      }
+      means.list[[chain]] <- means.list[[chain]][, sorting_index, drop = FALSE] 
     }
-    means.list[[chain]] <- means.list[[chain]][, sorting_index, drop = FALSE]
   }
   print(means.list)
 }
@@ -1111,10 +946,10 @@ stats.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
 ###-------------------------------------###
 
 ## INPUT:
-# num.chains:   Number of MCMC chains.
-# mcmc.chains:  A list of specific MCMC samples from each chain.
-# decimal:      Number of digits for rounding the results.
-# order.func:   Function that returns the component order for each draw
+# num.chains:   Number of MCMC chains;
+# mcmc.chains:  A list of specific MCMC samples from each chain;
+# decimal:      Number of digits for rounding the results;
+# order.func:   Function that returns the component order for each draw;
 
 ## OUTPUT:
 # Creates a trace plot and heat map.
@@ -1155,9 +990,6 @@ LabelSwitching.diag <- function(num.chains = 1, mcmc.chains, decimal = 4,
 
 
 
-
-
-
 # Subroutines and Complementary Programs...
 
 ###-----------------------------------###
@@ -1165,10 +997,10 @@ LabelSwitching.diag <- function(num.chains = 1, mcmc.chains, decimal = 4,
 ###-----------------------------------###
 
 ## INPUT:
-# chains: A list of complete MCMC samples from each chain.
-# name:   A string representing the name of parameters.
-# rhat:   Logical flag; if TRUE, compute and print Rhat values.
-# ess:    Logical flag; if TRUE, compute and print Effective Sample Size (ESS).
+# chains: A list of complete MCMC samples from each chain
+# name:   A string representing the name of parameters;
+# rhat:   Logical flag; if TRUE, compute and print Rhat values;
+# ess:    Logical flag; if TRUE, compute and print Effective Sample Size (ESS);
 
 ## OUTPUT:
 # Returns the extracted MCMC chains for the specified parameter.
@@ -1234,10 +1066,10 @@ mcmc.extract <- function(chains, name, rhat = FALSE, ess = FALSE) {
 ###-------------------------------------------------------------------------###
 
 ## INPUT:
-# x:          A vector that we want to transform (e.g., values of worths).
-# method:     A character string indicating the normalizing method ("center" or "reference").
-# reference:  A reference point used when method = "reference".
-#             Can be an index or a character name if x has names.
+# x:          A vector that we want to transform (e.g., values of worths);
+# method:     A character string indicating the normalizing method ("center" or "reference");
+# reference:  A reference point used when method = "reference";
+#             Can be an index or a character name if x has names;
 
 ## OUTPUT:
 # Returns a vector after centering transformation.

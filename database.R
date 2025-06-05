@@ -1,11 +1,10 @@
 #
 # Sourcing this R file contains database used in main.R.
 #
-#########################  BEGIN import database  ##############################
-
 # Create an environment to store all datasets
-database <- new.env()
-
+  database <- new.env()
+#
+#########################  BEGIN import database  ##############################
 
 
 ###---------------------------------------###
@@ -157,10 +156,30 @@ database$sumo <- countsToBinomial(result.matrix)
 database$sumo$n_ij <- database$sumo$win1 + database$sumo$win2
 database$sumo$y_ij <- database$sumo$win1
 
+##########################  END import database  ###############################
 
 
 
 
+#######################  BEGIN artificial database  ############################
+
+###--------------------------------###
+###        Generate F.true         ###
+###--------------------------------###
+
+generate.F.worths <- function(N = NULL, K = NULL, decay = NULL, seed = 73) {
+  stopifnot(N >= 2, K >= 1, decay > 0, decay < 1)
+  set.seed(seed)
+  F.true <- matrix(NA_real_, nrow = K, ncol = N)
+  var.target <- decay^(0:(K-1)) # monotonic variances V[k] (V[1]=1 >...> V[K])
+  
+  z <- rnorm(N)
+  z <- z - mean(z)
+  z <- z / sd(z)
+  F.true <- outer(var.target, z, function(v, zz) sqrt(v) * zz)
+  
+  return(F.true)
+}
 
 
 
@@ -169,45 +188,95 @@ database$sumo$y_ij <- database$sumo$win1
 ###        Create artificial data         ###
 ###---------------------------------------###
 
-# Generate artificial data for 4 entities
-w.true <- c(2.12, 1.4, 0.88)
-F.true <- matrix(c(
-  0.20, -0.60, 0.06, 0.26,
-  0.17, -0.51, 0.06, 0.23,
-  0.12, -0.36, 0.04, 0.16 
-), nrow=3, byrow = TRUE)
+Create.Artificial.Data <- function(num.freq = NULL, w0 = NULL, F0 = NULL) {
+  N <- ncol(F0) # number of entities
+  K <- nrow(F0) # dimensionality of each entity
+  scores <- as.numeric(exp( w0 %*% F0 ))
+  
+  ## Initiate an N×N matrix storing results (diagonal is NA)
+  result <- matrix(NA_integer_, nrow = N, ncol = N)
+  rownames(result) <- colnames(result) <- 
+    if (!is.null(colnames(F0))) colnames(F0) else paste0("Entity", 1:N)
+  
+  ## Simulate for each pair (i, j) 
+  set.seed(73)
+  for (i in 1:(N-1)) {
+    for (j in (i+1):N) {
+      p_ij <- scores[i] / (scores[i] + scores[j])
+      win.freq <- rbinom(n = 1, size = num.freq, prob = p_ij)
+      result[i, j] <- win.freq
+      result[j, i] <- num.freq - win.freq
+    }
+  }
+  return(result)
+}
+
+
+
+
+# Generate artificial data for 10 entities
+N <- 10
+database$K0.true10 <- 3
+database$artificial.name10 <- paste("Entity", 1:N)
+database$w.true10 <- c(2, 1.5, 1)
+database$F.true10 <- generate.F.worths(N = N, K = database$K0.true10, 
+                                       decay = 0.25, seed = 73)
 
 # Name the rows and columns
-database$artificial.4 <- Create.Artificial.Data(num.freq = 800, w0 = w.true, F0 = F.true)
-rownames(database$artificial.4) <- 
-  colnames(database$artificial.4) <- database$name.4
-
-# Convert to binomial format using countsToBinomial
-database$artificial.4 <- countsToBinomial(database$artificial.4)
-database$artificial.4$n_ij <- database$artificial.4$win1 + database$artificial.4$win2
-database$artificial.4$y_ij <- database$artificial.4$win1
-
-
-
-# Generate artificial data for 6 entities
-w.true <- c(2.0, 1.3, 0.9)
-F.true <- matrix(c(
-  0.08, 0.01, -0.17, -0.03, 0.00, 0.04,
-  0.10, 0.02, -0.22, -0.03, 0.00, 0.05,
-  0.12, 0.01, -0.28, -0.04, 0.01, 0.06
-), nrow = 3, byrow = TRUE)
-
-# Name the rows and columns
-database$artificial.6 <- Create.Artificial.Data(num.freq = 800, w0 = w.true, F0 = F.true)
-rownames(database$artificial.6) <- 
-  colnames(database$artificial.6) <- database$name.6
+database$artificial.10 <- Create.Artificial.Data(num.freq = 100, 
+                                                 w0 = database$w.true10, 
+                                                 F0 = database$F.true10)
+rownames(database$artificial.10) <- 
+  colnames(database$artificial.10) <- database$artificial.name10
 
 # Convert to binomial format
-database$artificial.6 <- countsToBinomial(database$artificial.6)
-database$artificial.6$n_ij <- database$artificial.6$win1 + database$artificial.6$win2
-database$artificial.6$y_ij <- database$artificial.6$win1
+database$artificial.10 <- countsToBinomial(database$artificial.10)
+database$artificial.10$n_ij <- database$artificial.10$win1 + database$artificial.10$win2
+database$artificial.10$y_ij <- database$artificial.10$win1
 
 
 
+# Generate artificial data for 30 entities
+N <- 15
+database$K0.true15 <- 4
+database$artificial.name15 <- paste("Entity", 1:N)
+database$w.true15 <- c(2.5, 2, 1.5, 1)
+database$F.true15 <- generate.F.worths(N = N, K = database$K0.true15,
+                                       decay = 0.25, seed = 11)
 
-##########################  END import database  ###############################
+# Name the rows and columns
+database$artificial.15 <- Create.Artificial.Data(num.freq = 1000, 
+                                                 w0 = database$w.true15,
+                                                 F0 = database$F.true15)
+rownames(database$artificial.15) <- 
+  colnames(database$artificial.15) <- database$artificial.name15
+
+# Convert to binomial format
+database$artificial.15 <- countsToBinomial(database$artificial.15)
+database$artificial.15$n_ij <- database$artificial.15$win1 + database$artificial.15$win2
+database$artificial.15$y_ij <- database$artificial.15$win1
+
+
+
+# Generate artificial data for 30 entities
+# 事後サンプリングが非常に遅い、、
+N <- 30
+database$K0.true30 <- 4
+database$artificial.name30 <- paste("Entity", 1:N)
+database$w.true30 <- c(2.5, 2, 1.5, 1)
+database$F.true30 <- generate.F.worths(N = N, K = database$K0.true30,
+                                       decay = 0.25, seed = 11)
+
+# Name the rows and columns
+database$artificial.30 <- Create.Artificial.Data(num.freq = 1000, 
+                                                 w0 = database$w.true30,
+                                                 F0 = database$F.true30)
+rownames(database$artificial.30) <- 
+  colnames(database$artificial.30) <- database$artificial.name30
+
+# Convert to binomial format
+database$artificial.30 <- countsToBinomial(database$artificial.30)
+database$artificial.30$n_ij <- database$artificial.30$win1 + database$artificial.30$win2
+database$artificial.30$y_ij <- database$artificial.30$win1
+
+########################  END artificial database  #############################
