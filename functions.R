@@ -20,7 +20,7 @@
 ## OUTPUT:
 # A list of MCMC samples for the parameters: omega, w, F, V.
 
-TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000, 
+TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
                        thin = 1, epsilon = 1e-3, rate = 1,
                        w0.prior = NULL, S0.prior = NULL, F.prior = NULL, 
                        V.prior = NULL, alpha = 3) {
@@ -56,6 +56,7 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
   
   ## Vectors to store posterior samples K in burn-in period
   K.pos <- numeric(burn)
+  K.prev <- 0
   
   #=======================   BEGIN MCMC sampling   =============================
   for (iter in 1:mcmc) {
@@ -76,7 +77,32 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
     B.omega <- t(Phi) %*% kappa + S0.inv %*% w0
     w.mean <- as.vector(A.omega %*% B.omega)
     w.Sigma <- A.omega
-    w <- mvrnorm(1, mu = w.mean, Sigma = w.Sigma)
+    # w <- mvrnorm(1, mu = w.mean, Sigma = w.Sigma)
+    
+    for (k in 1:K) {
+      idx <- setdiff(1:K, k)
+      inv.part <- tryCatch({
+        solve(w.Sigma[idx, idx])
+      }, error = function(e) {
+        message("Error in computing inverse matrix in", k,"th off-diagonal block: ", e$message)
+        return(NULL)
+      })
+      mu.cond <- w.mean[k] + w.Sigma[k, idx] %*% inv.part %*% (w[idx] - w.mean[idx])
+      var.cond <- w.Sigma[k, k] - w.Sigma[k, idx] %*% inv.part %*% w.Sigma[idx, k]
+      
+      # Sampling from the truncated Normal distribution
+      birth  <- (iter <= burn) && (K == K.prev + 1)    # TRUE only in a 'birth' step
+      
+      ## lower bound for the k-th component
+      if (iter == 1 || k == K || (birth && k >= K.prev)) {
+        lower <- 0
+      } else {
+        lower <- w[k + 1]
+      }
+      upper <- if (k == 1) Inf else w[k-1]
+      w[k] <- rtnorm(n = 1, mu = as.numeric(mu.cond), sd = sqrt(var.cond),
+                     lb = lower, ub = upper)
+    }
     
     ## Updating f_i for i = 1,...,N
     for (i in 1:N) {
@@ -134,9 +160,9 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
       F.worths <- F.worths - row.means # centering
       
       ## Sign of components in w turns to be positive
-      signs <- sign(w)
-      w.sorted <- abs(w)
-      F.sorted <- F.worths * matrix(signs, nrow = K, ncol = N, byrow = FALSE)
+      # signs <- sign(w)
+      # w.sorted <- abs(w)
+      # F.sorted <- F.worths * matrix(signs, nrow = K, ncol = N, byrow = FALSE)
       
       ## Apply permutations for identifiability
       # order.desc <- order(w.sorted, decreasing = TRUE)
@@ -144,14 +170,15 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
       # F.sorted <- F.sorted[order.desc, , drop = FALSE]
 
       ## Store posterior samples
-      w.pos[sample.idx, ] <- w.sorted
-      F.pos[sample.idx, , ] <- F.sorted
+      w.pos[sample.idx, ] <- w
+      F.pos[sample.idx, , ] <- F.worths
       V.pos[sample.idx, ] <- V
-      worths.pos[sample.idx, ] <- w.sorted %*% F.sorted[,1:N]
+      worths.pos[sample.idx, ] <- w %*% F.worths[,1:N]
     } else if (iter < burn) {
       # -----------------  BEGIN Adjust Dimensionality -------------------------
       prop = rowSums(abs(F.worths) < epsilon)/N # proportion of elements in each row less than eps in magnitude
       m_t = sum(prop >= rate)  # number of redundant columns
+      K.prev <- K
       
       if (runif(1) < exp(a0 + a1*iter)) {
         ## Decide whether to add a new dimension (birth) or remove inactive ones (death)
@@ -193,7 +220,6 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
       }
       
       K.pos[iter] <- K  # Store optimal dimensionality
-      
       # ------------------  END Adjust Dimensionality --------------------------
       
       ## Remove location indeterminacy
@@ -209,6 +235,7 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
       # -----------------  BEGIN Adjust Dimensionality -------------------------
       prop = rowSums(abs(F.worths) < epsilon)/N # proportion of elements in each row less than eps in magnitude
       m_t = sum(prop >= rate)  # number of redundant columns
+      K.prev <- K
       
       if (runif(1) < exp(a0 + a1*iter)) {
         ## Decide whether to add a new dimension (birth) or remove inactive ones (death)
