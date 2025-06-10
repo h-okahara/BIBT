@@ -1,7 +1,7 @@
 
-###------------------------------------------------------------###
-###        Trans-Dimensional Bradley-Terry (TDBT) model        ###
-###------------------------------------------------------------###
+###----------------------------------------------------###
+###    Trans-Dimensional Bradley-Terry (TDBT) model    ###
+###----------------------------------------------------###
 
 ## INPUT:
 # X:        An N×N matrix where the (i, j) entry indicates that player i defeats player j;
@@ -91,7 +91,7 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
       var.cond <- w.Sigma[k, k] - w.Sigma[k, idx] %*% inv.part %*% w.Sigma[idx, k]
       
       # Sampling from the truncated Normal distribution
-      birth  <- (iter <= burn) && (K == K.prev + 1)    # TRUE only in a 'birth' step
+      birth  <- (iter <= burn+1) && (K > K.prev)    # TRUE only in a 'birth' step
       
       ## lower bound for the k-th component
       if (iter == 1 || k == K || (birth && k >= K.prev)) {
@@ -100,6 +100,7 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
         lower <- w[k + 1]
       }
       upper <- if (k == 1) Inf else w[k-1]
+      # cat("iter: ", iter, ", k: ", k, ", lower: ", lower, ", upper: ", upper, "\n")
       w[k] <- rtnorm(n = 1, mu = as.numeric(mu.cond), sd = sqrt(var.cond),
                      lb = lower, ub = upper)
     }
@@ -159,23 +160,12 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
       row.means <- rowMeans(F.worths[, 1:N, drop = FALSE])
       F.worths <- F.worths - row.means # centering
       
-      ## Sign of components in w turns to be positive
-      # signs <- sign(w)
-      # w.sorted <- abs(w)
-      # F.sorted <- F.worths * matrix(signs, nrow = K, ncol = N, byrow = FALSE)
-      
-      ## Apply permutations for identifiability
-      # order.desc <- order(w.sorted, decreasing = TRUE)
-      # w.sorted <- w.sorted[order.desc]
-      # F.sorted <- F.sorted[order.desc, , drop = FALSE]
-
       ## Store posterior samples
       w.pos[sample.idx, ] <- w
       F.pos[sample.idx, , ] <- F.worths
       V.pos[sample.idx, ] <- V
       worths.pos[sample.idx, ] <- w %*% F.worths[,1:N]
     } else if (iter < burn) {
-      # -----------------  BEGIN Adjust Dimensionality -------------------------
       prop = rowSums(abs(F.worths) < epsilon)/N # proportion of elements in each row less than eps in magnitude
       m_t = sum(prop >= rate)  # number of redundant columns
       K.prev <- K
@@ -218,9 +208,7 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
           }
         }
       }
-      
       K.pos[iter] <- K  # Store optimal dimensionality
-      # ------------------  END Adjust Dimensionality --------------------------
       
       ## Remove location indeterminacy
       ## Here, either impose the sum-to-zero constraint or endpoint constraints.
@@ -232,7 +220,6 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
         F.worths <- F.worths - row.means # centering
       }
     } else if (iter == burn) {
-      # -----------------  BEGIN Adjust Dimensionality -------------------------
       prop = rowSums(abs(F.worths) < epsilon)/N # proportion of elements in each row less than eps in magnitude
       m_t = sum(prop >= rate)  # number of redundant columns
       K.prev <- K
@@ -275,10 +262,8 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
           }
         }
       }
-      
       K.pos[iter] <- K  # Store optimal dimensionality
       K.optimal <- median(K.pos[1:iter])  # Determined dimensionality
-      # ------------------  END Adjust Dimensionality --------------------------
       
       ## Adjust dimensionality of each parameter
       if (K.optimal > K) { # Birth
@@ -328,9 +313,9 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
 
 
 
-###--------------------------------------------------###
-###        Run Multiple Chains for TDBT.Gibbs        ###
-###--------------------------------------------------###
+###------------------------------------------###
+###    Run Multiple Chains for TDBT.Gibbs    ###
+###------------------------------------------###
 
 ## INPUT:
 # num.chains: Number of independent MCMC chains to run;
@@ -389,9 +374,9 @@ run.MCMCs <- function(num.chains = 1, name, MCMC.plot = TRUE, rhat = FALSE, ess 
 
 
 
-###---------------------------------###
-###        MCMC sample paths        ###
-###---------------------------------###
+###-------------------------###
+###    MCMC sample paths    ###
+###-------------------------###
 
 ## INPUT:
 # num.chains:   Number of MCMC chains;
@@ -452,9 +437,9 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains, name) {
 
 
 
-###-----------------------------------###
-###        Posterior Histogram        ###
-###-----------------------------------###
+###---------------------------###
+###    Posterior Histogram    ###
+###---------------------------###
 
 ## INPUT:
 # num.chains:   Number of MCMC chains;
@@ -543,9 +528,9 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, bins = 30) {
 
 
 
-###--------------------------------------------###
-###        Compute Posterior Statistics        ###
-###--------------------------------------------###
+###------------------------------------###
+###    Compute Posterior Statistics    ###
+###------------------------------------###
 
 ## INPUT:
 # num.chains:   Number of MCMC chains;
@@ -596,9 +581,9 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, param.name, decimal = 
 
 
 
-###-----------------------------------------###
-###           Plot ACFs for MCMC            ###
-###-----------------------------------------###
+###--------------------------###
+###    Plot ACFs for MCMC    ###
+###--------------------------###
 
 ## INPUT:
 # num.chains:   Number of MCMC chains;
@@ -681,9 +666,9 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name) {
 
 
 
-###------------------------------------------###
-###        Compute Credible Intervals        ###
-###------------------------------------------###
+###----------------------------------###
+###    Compute Credible Intervals    ###
+###----------------------------------###
 
 ## INPUT:
 # num.chains:   Number of MCMC chains;
@@ -776,9 +761,77 @@ compute.CIs <- function(num.chains = 1, mcmc.chains, name, level = 0.95, decimal
 
 
 
-###-----------------------------------------###
-###        Plot Worths Contributions        ###
-###-----------------------------------------###
+###--------------------------------------------###
+###    Plot contributions of each dimension    ###
+###--------------------------------------------###
+
+## INPUT:
+# num.chains:   Number of MCMC chains;
+# mcmc.chains:  A list of specific MCMC samples from each chain;
+# plot:         Logical flag; if TRUE, draw barplot for each dimensional contribution;
+# worth:        Logical flag; if TRUE, compute weight adjusted contributions;
+
+## OUTPUT:
+# Plot the contribution of each dimension
+
+plot.contributions <- function(chains, plot = TRUE, worth = FALSE) {
+  ## Preparation
+  num.chains <- length(chains)
+  F.worths <- lapply(chains, function(chain) chain[["F.worths"]]) # mcmc × K × N
+  w <- lapply(chains, function(chain) chain[["w"]]) # mcmc × K
+  mcmc <- dim(F.worths[[1]])[1]
+  K <- dim(F.worths[[1]])[2]
+  N <- dim(F.worths[[1]])[3]
+
+  ## Helper function: compute per‐iteration contribution vector from F.worths (and w)
+  compute.contribution <- function(F.worths_t, w_t = NULL, worth.flag = FALSE) {
+    V_t <- apply(F.worths_t, 1, var)
+    if (worth.flag) {
+      (w_t^2) * V_t / sum((w_t^2) * V_t)
+    } else {
+      V_t / sum(V_t)
+    }
+  }
+  
+  ## Compute R for every chain and iteration
+  R.list <- lapply(seq_len(num.chains), function(ch) {
+    t(sapply(seq_len(mcmc), function(t) {
+      compute.contribution(F.worths[[ch]][t, , ], w[[ch]][t, ], worth)
+    }))
+  })
+  
+  ## Posterior means and 95% CI for each chain
+  R.means <- sapply(R.list, colMeans)
+  R.CI <- array(NA, c(2, K, num.chains))
+  for (ch in seq_len(num.chains)) {
+    R.CI[ , , ch] <- apply(R.list[[ch]], 2, quantile, probs = c(0.025, 0.975))
+  }
+  cat("Contributions of each dimension is \n")
+  cat("[", R.means, "] \n")
+  
+  ## Plot: grouped barplot by chain
+  if (plot) {
+    df <- expand.grid(dim = factor(1:K), chain = factor(1:num.chains))
+    df$mean  <- as.vector(R.means)
+    df$lower <- as.vector(R.CI[1, , ])
+    df$upper <- as.vector(R.CI[2, , ])
+    
+    ggplot(df, aes(x = dim, y = mean, fill = chain)) +
+      geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+      geom_errorbar(aes(ymin = lower, ymax = upper),
+                    position = position_dodge(width = 0.9),
+                    width = 0.2) +
+      scale_fill_brewer(palette = "Set1") +      # or any palette you like
+      labs(x = "Dimension", y = "Contribution ratio") +
+      theme_minimal()
+  }
+}
+
+
+
+###---------------------------------###
+###    Plot Worths Contributions    ###
+###---------------------------------###
 
 ## INPUT:
 # num.chains:  Number of MCMC chains;
@@ -895,9 +948,9 @@ plot.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
 
 
 
-###--------------------------------------###
-###        Plot Worths Statistics        ###
-###--------------------------------------###
+###------------------------------###
+###    Plot Worths Statistics    ###
+###------------------------------###
 
 ## INPUT:
 # num.chains:  Number of MCMC chains;
@@ -968,9 +1021,9 @@ stats.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
 
 
 
-###-------------------------------------###
-###        Check Label-Switching        ###
-###-------------------------------------###
+###-----------------------------###
+###    Check Label-Switching    ###
+###-----------------------------###
 
 ## INPUT:
 # num.chains:   Number of MCMC chains;
@@ -1019,9 +1072,9 @@ LabelSwitching.diag <- function(num.chains = 1, mcmc.chains, decimal = 4,
 
 # Subroutines and Complementary Programs...
 
-###-----------------------------------###
-###        Extract MCMC chains        ###
-###-----------------------------------###
+###---------------------------###
+###    Extract MCMC chains    ###
+###---------------------------###
 
 ## INPUT:
 # chains: A list of complete MCMC samples from each chain
@@ -1084,48 +1137,3 @@ mcmc.extract <- function(chains, name, rhat = FALSE, ess = FALSE) {
   }
   return(mcmc.chains)
 }
-
-
-
-
-###-------------------------------------------------------------------------###
-###        Apply sum-to-zero or reference-based centering constraint        ###
-###-------------------------------------------------------------------------###
-
-## INPUT:
-# x:          A vector that we want to transform (e.g., values of worths);
-# method:     A character string indicating the normalizing method ("center" or "reference");
-# reference:  A reference point used when method = "reference";
-#             Can be an index or a character name if x has names;
-
-## OUTPUT:
-# Returns a vector after centering transformation.
-# 修正予定 (識別条件のオプション化の際に利用する)
-
-normalization <- function(x, method = c("center", "reference"), reference = NULL) {
-  method <- match.arg(method)
-  
-  shift <- switch(
-    method,
-  
-    center = mean(x),
-    
-    reference = {
-      if (is.null(reference)) stop("`reference` must be provided when method = 'reference'.")
-      
-      if (is.numeric(reference) && length(reference) == 1) {
-        x[reference]
-      } else if (is.character(reference) && !is.null(names(x))) {
-        if (!(reference %in% names(x))) {
-          stop(paste("Reference name", reference, "not found in names(x)."))
-        }
-        x[reference]
-        
-      } else {
-        stop("Invalid type for `reference`. Must be numeric index or character name.")
-      }
-    }
-  )
-  return(x - shift)
-}
-
