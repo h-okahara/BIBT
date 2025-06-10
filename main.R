@@ -11,14 +11,14 @@ source("database.R")
 # X <- database$artificial.10
 # entities.name <- database$artificial.name10
 # N <- length(entities.name)  # number of entities
-dimensionality <- 10 # round(5 * log(30), 1)
+dimensionality <- round(5 * log(30), 1)
 num.iter <- 30000
-num.burn <- num.iter/5
-alpha <- 5
+num.burn <- 10000 # num.iter/5
+alpha <- 3
 
 ## For artificial data.
 ## Compute means for each entity and each dimension
-N <- 10
+N <- 30
 X <- database[[paste0("artificial.", N)]]
 entities.name <- database[[paste0("artificial.name", N)]]
 K0 <- database[[paste0("K0.true", N)]]
@@ -55,6 +55,7 @@ citations.qv.sorted <- citations.qv
 citations.qv.sorted$qvframe <- qvframe.sorted
 names.sorted <- rownames(citations.qv$qvframe)[idx]
 plot(citations.qv.sorted, levelNames = names.sorted)
+
 ######################  END BradleyTerry2 package  #############################
 
 
@@ -63,7 +64,7 @@ plot(citations.qv.sorted, levelNames = names.sorted)
 ###########################  BEGIN TDBT.Gibbs  #################################
 
 num.chains <- 1
-param.name <- "F.worths"   # Options: (w, F.worths, V, worths)
+param.name <- "w"   # Options: (w, F.worths, V, worths)
 mcmc.results <- run.MCMCs(num.chains = num.chains, name = param.name, MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
                           X, K = dimensionality, mcmc = num.iter, burn = num.burn, 
                           thin = 1, epsilon = 2e-1, rate = 1,
@@ -82,6 +83,7 @@ stats.posteriors(num.chains, specific.mcmc, param.name, decimal = 6) # compute t
 compute.CIs(num.chains, specific.mcmc, param.name, level = 0.95, decimal = 3, hpd = TRUE) # compute credible intervals
 
 ## Compare each MCMC chain
+plot.contributions(mcmc.results$all.mcmc, plot = TRUE, worth = FALSE)
 plot.worths(num.chains, mcmc.results$all.mcmc, names = entities.name, partition = FALSE, order = "desc", level = 1)
 stats.worths(num.chains, mcmc.results$all.mcmc, names = entities.name, partition = TRUE, order = NULL, decimal = 2)
 
