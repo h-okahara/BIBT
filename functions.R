@@ -164,6 +164,7 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
       w.pos[sample.idx, ] <- w
       F.pos[sample.idx, , ] <- F.worths
       V.pos[sample.idx, ] <- V
+      tau.pos[sample.idx, ] <- tau
       worths.pos[sample.idx, ] <- w %*% F.worths[,1:N]
     } else if (iter < burn) {
       prop = rowSums(abs(F.worths) < epsilon)/N # proportion of elements in each row less than eps in magnitude
@@ -300,13 +301,15 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
       w.pos <- matrix(0, nrow = mcmc.row, ncol = K.optimal)
       F.pos <- array(0, dim = c(mcmc.row, K.optimal, N))
       V.pos <- matrix(0, nrow = mcmc.row, ncol = K.optimal)
+      tau.pos <- matrix(0, nrow = mcmc.row, ncol = K.optimal)
       worths.pos <- matrix(0, nrow = mcmc.row, ncol = N)
       K <- K.optimal
     }
   }
   #=======================   END MCMC sampling   ===============================
   
-  result <- list(w = w.pos, F.worths = F.pos, V = V.pos, worths = worths.pos, K = K.pos)
+  result <- list(w = w.pos, F.worths = F.pos, V = V.pos, tau = tau.pos,
+                 worths = worths.pos, K = K.pos)
   return(result)
 }
 
@@ -477,7 +480,7 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, bins = 30) {
     }
     mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
     
-  } else if (name == "V") {
+  } else if (name == "V" || name == "tau") {
     mcmc <- nrow(mcmc.chains[[1]])
     K  <- ncol(mcmc.chains[[1]])
     
@@ -1107,7 +1110,7 @@ mcmc.extract <- function(chains, name, rhat = FALSE, ess = FALSE) {
         }
       } 
     }
-  } else if (name == "V") {
+  } else if (name == "V" || name == "tau") {
     mcmc.obj <- lapply(mcmc.chains, as.mcmc)
     mcmc.objs <- mcmc.list(mcmc.obj)
     mcmc.objs <- mcmc.objs[, 2:3, ]
