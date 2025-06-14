@@ -161,8 +161,8 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
       F.worths <- F.worths - row.means # centering
       
       ## Store posterior samples
-      w.pos[sample.idx, ] <- w
-      F.pos[sample.idx, , ] <- F.worths
+      w.pos[sample.idx, ] <- w * sd(F.worths[1,]) 
+      F.pos[sample.idx, , ] <- F.worths / sd(F.worths[1,]) 
       V.pos[sample.idx, ] <- V
       tau.pos[sample.idx, ] <- tau
       worths.pos[sample.idx, ] <- w %*% F.worths[,1:N]
@@ -353,7 +353,7 @@ run.MCMCs <- function(num.chains = 1, name, MCMC.plot = TRUE, rhat = FALSE, ess 
                  thin = thin, epsilon = epsilon, rate = rate,
                  w0.prior = w0.prior, S0.prior = S0.prior, 
                  F.prior = F.prior, V.prior = V.prior, alpha = alpha)
-    }, mc.cores = min(num.chains, parallel::detectCores()-1)) 
+    }, mc.cores = min(num.chains, parallel::detectCores()-1))
   } else {
     stop("Dimensionality must be K > 1")
     #
