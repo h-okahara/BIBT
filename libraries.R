@@ -4,16 +4,21 @@
 ########################  BEGIN import libraries  ##############################
 
 library(BradleyTerry2)
-library(PLMIX)
-library(PlackettLuce)
-
-library(BayesLogit)
-library(MASS)
-library(truncdist)
 library(coda)
 library(posterior)
 library(bayesplot)
+library(BayesLogit)
+
+library(MASS)
+library(matrixStats)
+library(truncdist)
+library(TruncatedNormal)
+
 library(parallel)
+library(future)
+library(future.apply)
+library(progressr)
+library(cli)
 
 library(ggplot2)
 library(ggpol)
