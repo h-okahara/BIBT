@@ -191,9 +191,9 @@ generate.F.true <- function(N = NULL, K = NULL, decay = NULL, seed = 73) {
 
 
 
-###---------------------------------------###
-###        Create artificial data         ###
-###---------------------------------------###
+###------------------------------###
+###    Create artificial data    ###
+###------------------------------###
 
 Create.Artificial.Data <- function(num.freq = NULL, w0 = NULL, F0 = NULL) {
   N <- ncol(F0) # number of entities
@@ -226,13 +226,15 @@ N <- 10
 database$K0.true10 <- 3
 database$artificial.name10 <- paste("Entity", 1:N)
 database$w.true10 <- c(1, 0.75, 0.5)
-database$F.true10 <- generate.F.true(N = N, K = database$K0.true10, decay = 0.5, seed = 73)
+database$F.true10 <- generate.F.true(N = N, K = database$K0.true10, decay = 0.3, seed = 73)
 
+# rowVars(database$F.true10)
+# var10 <- rowVars(database$F.true10)
 # var10 <- rowVars(database$F.true10 * database$w.true10)
 # var10 / sum(var10)
 
 # Name the rows and columns
-database$artificial.10 <- Create.Artificial.Data(num.freq = 10, 
+database$artificial.10 <- Create.Artificial.Data(num.freq = 30, 
                                                  w0 = database$w.true10, 
                                                  F0 = database$F.true10)
 rownames(database$artificial.10) <- 
@@ -249,14 +251,16 @@ database$artificial.10$y_ij <- database$artificial.10$win1
 N <- 15
 database$K0.true15 <- 5
 database$artificial.name15 <- paste("Entity", 1:N)
-database$w.true15 <- c(3, 2.5, 2, 1.5, 1)
-database$F.true15 <- generate.F.worths(N = N, K = database$K0.true15, decay = 0.7, seed = 73)
+database$w.true15 <- c(1, 0.85, 0.650, 0.5, 0.3)
+database$F.true15 <- generate.F.true(N = N, K = database$K0.true15, decay = 0.6, seed = 73)
 
-# var15 <- rowVars(database$F.true15) #* database$w.true15)
+# rowVars(database$F.true15)
+# var15 <- rowVars(database$F.true15)
+# var15 <- rowVars(database$F.true15 * database$w.true15)
 # var15 / sum(var15)
 
 # Name the rows and columns
-database$artificial.15 <- Create.Artificial.Data(num.freq = 30,
+database$artificial.15 <- Create.Artificial.Data(num.freq = 10,
                                                  w0 = database$w.true15,
                                                  F0 = database$F.true15)
 rownames(database$artificial.15) <- 
@@ -274,13 +278,13 @@ N <- 30
 database$K0.true30 <- 4
 database$artificial.name30 <- paste("Entity", 1:N)
 database$w.true30 <- c(2.5, 2, 1.5, 1)
-database$F.true30 <- generate.F.worths(N = N, K = database$K0.true30, decay = 0.3, seed = 11)
+database$F.true30 <- generate.F.true(N = N, K = database$K0.true30, decay = 0.3, seed = 11)
 
 # var30 <- rowVars(database$F.true30  * database$w.true30)
 # var30 / sum(var30)
 
 # Name the rows and columns
-database$artificial.30 <- Create.Artificial.Data(num.freq = 30, 
+database$artificial.30 <- Create.Artificial.Data(num.freq = 10, 
                                                  w0 = database$w.true30,
                                                  F0 = database$F.true30)
 rownames(database$artificial.30) <- 
@@ -298,8 +302,7 @@ N <- 100
 database$K0.true100 <- 5
 database$artificial.name100 <- paste("Entity", 1:N)
 database$w.true100 <- c(3, 2.5, 2, 1.5, 1)
-database$F.true100 <- generate.F.worths(N = N, K = database$K0.true100,
-                                       decay = 0.7, seed = 73)
+database$F.true100 <- generate.F.true(N = N, K = database$K0.true100, decay = 0.7, seed = 73)
 
 # var100 <- rowVars(database$F.true100  * database$w.true100)
 # var100 / sum(var100)
