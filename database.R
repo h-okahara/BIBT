@@ -163,22 +163,32 @@ database$sumo$y_ij <- database$sumo$win1
 
 #######################  BEGIN artificial database  ############################
 
-###--------------------------------###
-###        Generate F.true         ###
-###--------------------------------###
+###-----------------------###
+###    Generate F.true    ###
+###-----------------------###
 
-generate.F.worths <- function(N = NULL, K = NULL, decay = NULL, seed = 73) {
-  stopifnot(N >= 2, K >= 1, decay > 0, decay < 1)
-  set.seed(seed)
-  F.true <- matrix(NA_real_, nrow = K, ncol = N)
-  var.target <- decay^(0:(K-1)) # monotonic variances V[k] (V[1]=1 >...> V[K])
+generate.F.true <- function(N = NULL, K = NULL, decay = NULL, seed = 73) {
+  ## Helper function: generate F.true
+  generate.F.worths <- function(N = NULL, K = NULL, decay = NULL, seed = 73) {
+    stopifnot(N >= 2, K >= 1, decay > 0, decay < 1)
+    set.seed(seed)
+    F.true <- matrix(NA_real_, nrow = K, ncol = N)
+    
+    for (k in 1:K){
+      z <- rnorm(N)
+      z <- scale(z, center = TRUE, scale = TRUE)
+      F.true[k, ] <- sqrt(decay^(k-1)) * z
+    }
+    return(F.true)
+  }
+  F.true <- generate.F.worths(N = N, K = K, decay = decay, seed = seed)
   
-  z <- rnorm(N)
-  z <- z - mean(z)
-  z <- z / sd(z)
-  F.true <- outer(var.target, z, function(v, zz) sqrt(v) * zz)
+  ## Sort the original column f_i into a descending index
+  F.monotonic <- t(apply(F.true, 1, function(row) sort(row, decreasing = TRUE)))
   
-  return(F.true)
+  # スケーリング（任意）
+  F.monotonic <- F.monotonic / sd(F.monotonic[1, ])
+  return(F.monotonic)
 }
 
 
@@ -218,12 +228,14 @@ Create.Artificial.Data <- function(num.freq = NULL, w0 = NULL, F0 = NULL) {
 N <- 10
 database$K0.true10 <- 3
 database$artificial.name10 <- paste("Entity", 1:N)
-database$w.true10 <- c(2, 1.5, 1)
-database$F.true10 <- generate.F.worths(N = N, K = database$K0.true10, 
-                                       decay = 0.25, seed = 73)
+database$w.true10 <- c(1, 0.75, 0.5)
+database$F.true10 <- generate.F.true(N = N, K = database$K0.true10, decay = 0.5, seed = 73)
+
+# var10 <- rowVars(database$F.true10 * database$w.true10)
+# var10 / sum(var10)
 
 # Name the rows and columns
-database$artificial.10 <- Create.Artificial.Data(num.freq = 100, 
+database$artificial.10 <- Create.Artificial.Data(num.freq = 10, 
                                                  w0 = database$w.true10, 
                                                  F0 = database$F.true10)
 rownames(database$artificial.10) <- 
@@ -238,14 +250,16 @@ database$artificial.10$y_ij <- database$artificial.10$win1
 
 # Generate artificial data for 30 entities
 N <- 15
-database$K0.true15 <- 4
+database$K0.true15 <- 5
 database$artificial.name15 <- paste("Entity", 1:N)
-database$w.true15 <- c(2.5, 2, 1.5, 1)
-database$F.true15 <- generate.F.worths(N = N, K = database$K0.true15,
-                                       decay = 0.25, seed = 11)
+database$w.true15 <- c(3, 2.5, 2, 1.5, 1)
+database$F.true15 <- generate.F.worths(N = N, K = database$K0.true15, decay = 0.7, seed = 73)
+
+# var15 <- rowVars(database$F.true15) #* database$w.true15)
+# var15 / sum(var15)
 
 # Name the rows and columns
-database$artificial.15 <- Create.Artificial.Data(num.freq = 1000, 
+database$artificial.15 <- Create.Artificial.Data(num.freq = 30,
                                                  w0 = database$w.true15,
                                                  F0 = database$F.true15)
 rownames(database$artificial.15) <- 
@@ -259,16 +273,17 @@ database$artificial.15$y_ij <- database$artificial.15$win1
 
 
 # Generate artificial data for 30 entities
-# 事後サンプリングが非常に遅い、、
 N <- 30
 database$K0.true30 <- 4
 database$artificial.name30 <- paste("Entity", 1:N)
 database$w.true30 <- c(2.5, 2, 1.5, 1)
-database$F.true30 <- generate.F.worths(N = N, K = database$K0.true30,
-                                       decay = 0.25, seed = 11)
+database$F.true30 <- generate.F.worths(N = N, K = database$K0.true30, decay = 0.3, seed = 11)
+
+# var30 <- rowVars(database$F.true30  * database$w.true30)
+# var30 / sum(var30)
 
 # Name the rows and columns
-database$artificial.30 <- Create.Artificial.Data(num.freq = 1000, 
+database$artificial.30 <- Create.Artificial.Data(num.freq = 30, 
                                                  w0 = database$w.true30,
                                                  F0 = database$F.true30)
 rownames(database$artificial.30) <- 
@@ -278,5 +293,30 @@ rownames(database$artificial.30) <-
 database$artificial.30 <- countsToBinomial(database$artificial.30)
 database$artificial.30$n_ij <- database$artificial.30$win1 + database$artificial.30$win2
 database$artificial.30$y_ij <- database$artificial.30$win1
+
+
+
+# Generate artificial data for 100 entities
+N <- 100
+database$K0.true100 <- 5
+database$artificial.name100 <- paste("Entity", 1:N)
+database$w.true100 <- c(3, 2.5, 2, 1.5, 1)
+database$F.true100 <- generate.F.worths(N = N, K = database$K0.true100,
+                                       decay = 0.7, seed = 73)
+
+# var100 <- rowVars(database$F.true100  * database$w.true100)
+# var100 / sum(var100)
+
+# Name the rows and columns
+database$artificial.100 <- Create.Artificial.Data(num.freq = 30, 
+                                                  w0 = database$w.true100,
+                                                  F0 = database$F.true100)
+rownames(database$artificial.100) <- 
+  colnames(database$artificial.100) <- database$artificial.name100
+
+# Convert to binomial format
+database$artificial.100 <- countsToBinomial(database$artificial.100)
+database$artificial.100$n_ij <- database$artificial.100$win1 + database$artificial.100$win2
+database$artificial.100$y_ij <- database$artificial.100$win1
 
 ########################  END artificial database  #############################
