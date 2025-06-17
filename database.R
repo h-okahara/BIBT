@@ -185,7 +185,6 @@ generate.F.true <- function(N = NULL, K = NULL, decay = NULL, seed = 73) {
   
   ## Sort the original column f_i into a descending index
   F.monotonic <- t(apply(F.true, 1, function(row) sort(row, decreasing = TRUE)))
-  F.monotonic <- F.monotonic / sd(F.monotonic[1, ])
   return(F.monotonic)
 }
 
