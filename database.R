@@ -184,8 +184,9 @@ generate.F.true <- function(N = NULL, K = NULL, decay = NULL, seed = 73) {
   F.true <- generate.F.worths(N = N, K = K, decay = decay, seed = seed)
   
   ## Sort the original column f_i into a descending index
-  F.monotonic <- t(apply(F.true, 1, function(row) sort(row, decreasing = TRUE)))
-  return(F.monotonic)
+  F.true[1, ] <- sort(F.true[1, ], decreasing = TRUE)
+  F.true[2, ] <- sort(F.true[2, ], decreasing = FALSE)
+  return(F.true)
 }
 
 
@@ -195,22 +196,28 @@ generate.F.true <- function(N = NULL, K = NULL, decay = NULL, seed = 73) {
 ###    Create artificial data    ###
 ###------------------------------###
 
-Create.Artificial.Data <- function(num.freq = NULL, w0 = NULL, F0 = NULL) {
+Create.Artificial.Data <- function(num.freq = NULL, w0 = NULL, F0 = NULL, gamma0 = 0, seed = 73) {
   N <- ncol(F0) # number of entities
   K <- nrow(F0) # dimensionality of each entity
-  scores <- as.numeric(exp( w0 %*% F0 ))
+  
+  ## Make skew-symmetric Gamma matrix
+  J_skew.mat <- matrix(0, K, K)
+  J_skew.mat[upper.tri(J_skew.mat)] <-  1
+  J_skew.mat[lower.tri(J_skew.mat)] <- -1
+  Gamma  <- gamma0 * J_skew.mat
   
   ## Initiate an N×N matrix storing results (diagonal is NA)
   result <- matrix(NA_integer_, nrow = N, ncol = N)
   rownames(result) <- colnames(result) <- 
     if (!is.null(colnames(F0))) colnames(F0) else paste0("Entity", 1:N)
   
-  ## Simulate for each pair (i, j) 
-  set.seed(73)
+  ## Simulate for each pair (i,j)
   for (i in 1:(N-1)) {
     for (j in (i+1):N) {
-      p_ij <- scores[i] / (scores[i] + scores[j])
-      win.freq <- rbinom(n = 1, size = num.freq, prob = p_ij)
+      M_ij <- as.numeric(crossprod(w0, F0[, i] - F0[, j]) 
+                         + crossprod(F0[, i], Gamma %*% F0[, j]))
+      p_ij <- 1 / (1 + exp(-M_ij))
+      win.freq <- rbinom(1, size = num.freq, prob = p_ij)
       result[i, j] <- win.freq
       result[j, i] <- num.freq - win.freq
     }
@@ -219,24 +226,27 @@ Create.Artificial.Data <- function(num.freq = NULL, w0 = NULL, F0 = NULL) {
 }
 
 
-
-
 # Generate artificial data for 10 entities
 N <- 10
-database$K0.true10 <- 3
+database$K0.true10 <- 2
 database$artificial.name10 <- paste("Entity", 1:N)
-database$w.true10 <- c(1, 0.75, 0.5)
-database$F.true10 <- generate.F.true(N = N, K = database$K0.true10, decay = 0.3, seed = 73)
+database$gamma.true10 <- 1.5
+database$w.true10 <- c(1, 0.8)
+database$w.true10 <- database$w.true10 / norm(database$w.true10, type = "2")
+database$F.true10 <- generate.F.true(N = N, K = database$K0.true10, decay = 0.7, seed = 73)
+# worths <- crossprod(database$w.true10, database$F.true10)
 
 # rowVars(database$F.true10)
+# rowSds(database$F.true10)
 # var10 <- rowVars(database$F.true10)
-# var10 <- rowVars(database$F.true10 * database$w.true10)
+# var10 <- rowVars(database$w.true10 * database$F.true10)
 # var10 / sum(var10)
 
 # Name the rows and columns
 database$artificial.10 <- Create.Artificial.Data(num.freq = 30, 
                                                  w0 = database$w.true10, 
-                                                 F0 = database$F.true10)
+                                                 F0 = database$F.true10,
+                                                 gamma0 = database$gamma.true10)
 rownames(database$artificial.10) <- 
   colnames(database$artificial.10) <- database$artificial.name10
 
@@ -249,10 +259,12 @@ database$artificial.10$y_ij <- database$artificial.10$win1
 
 # Generate artificial data for 30 entities
 N <- 15
-database$K0.true15 <- 5
+database$K0.true15 <- 3
 database$artificial.name15 <- paste("Entity", 1:N)
-database$w.true15 <- c(1, 0.85, 0.650, 0.5, 0.3)
-database$F.true15 <- generate.F.true(N = N, K = database$K0.true15, decay = 0.6, seed = 73)
+database$gamma.true15 <- 0.8
+database$w.true15 <- c(1, 0.9, 0.8)
+database$w.true15 <- database$w.true15 / norm(database$w.true15, type = "2")
+database$F.true15 <- generate.F.true(N = N, K = database$K0.true15, decay = 0.3, seed = 73)
 
 # rowVars(database$F.true15)
 # var15 <- rowVars(database$F.true15)
@@ -260,9 +272,10 @@ database$F.true15 <- generate.F.true(N = N, K = database$K0.true15, decay = 0.6,
 # var15 / sum(var15)
 
 # Name the rows and columns
-database$artificial.15 <- Create.Artificial.Data(num.freq = 10,
+database$artificial.15 <- Create.Artificial.Data(num.freq = 30,
                                                  w0 = database$w.true15,
-                                                 F0 = database$F.true15)
+                                                 F0 = database$F.true15,
+                                                 gamma0 = database$gamma.true15)
 rownames(database$artificial.15) <- 
   colnames(database$artificial.15) <- database$artificial.name15
 
@@ -270,6 +283,19 @@ rownames(database$artificial.15) <-
 database$artificial.15 <- countsToBinomial(database$artificial.15)
 database$artificial.15$n_ij <- database$artificial.15$win1 + database$artificial.15$win2
 database$artificial.15$y_ij <- database$artificial.15$win1
+
+
+########################### BEGIN Test #########################################
+
+# J_skew.mat <- matrix(0, database$K0.true15, database$K0.true15)
+# J_skew.mat[upper.tri(J_skew.mat)] <-  1
+# J_skew.mat[lower.tri(J_skew.mat)] <- -1
+# Gamma  <- database$gamma.true15 * J_skew.mat
+
+# TRUE
+# main.true <- crossprod(database$w.true15, database$F.true15[,1]-database$F.true15[,2])
+# int.true <- crossprod(database$F.true15[,1], Gamma %*% database$F.true15[,2])
+# main.true + int.true
 
 
 
@@ -318,5 +344,6 @@ rownames(database$artificial.100) <-
 database$artificial.100 <- countsToBinomial(database$artificial.100)
 database$artificial.100$n_ij <- database$artificial.100$win1 + database$artificial.100$win2
 database$artificial.100$y_ij <- database$artificial.100$win1
+
 
 ########################  END artificial database  #############################
