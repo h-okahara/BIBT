@@ -11,14 +11,19 @@ source("database.R")
 # X <- database$artificial.10
 # entities.name <- database$artificial.name10
 # N <- length(entities.name)  # number of entities
-dimensionality <- round(5 * log(30), 1)
-num.iter <- 30000
+dimensionality <- 3 # round(5 * log(15), 0)
+num.iter <- 50000
 num.burn <- 10000 # num.iter/5
 alpha <- 3
 
+## For real-world data.
+# X <- database$sumo
+# entities.name <- database$name.sumo
+# N <- length(entities.name)
+
 ## For artificial data.
 ## Compute means for each entity and each dimension
-N <- 30
+N <- 15
 X <- database[[paste0("artificial.", N)]]
 entities.name <- database[[paste0("artificial.name", N)]]
 K0 <- database[[paste0("K0.true", N)]]
@@ -30,7 +35,7 @@ for (k in 1:K0) {
 }
 rownames(out) <- paste("Dimension", 1:K0)
 colnames(out) <- entities.name
-out
+# out
 
 ######################  END import & setting  ##################################
 
@@ -48,47 +53,61 @@ par(mfrow = c(1, 1), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
 
 # the MLEs of strength parameters and visualization
 # BTabilities(citeModel)
+sorting <- FALSE
 citations.qv <- qvcalc(BTabilities(citeModel))
-idx <- order(citations.qv$qvframe$estimate, decreasing = TRUE)
-qvframe.sorted <- citations.qv$qvframe[idx, ]
-citations.qv.sorted <- citations.qv
-citations.qv.sorted$qvframe <- qvframe.sorted
-names.sorted <- rownames(citations.qv$qvframe)[idx]
-plot(citations.qv.sorted, levelNames = names.sorted)
+if (sorting) {
+  idx <- order(citations.qv$qvframe$estimate, decreasing = TRUE)
+  qvframe.sorted <- citations.qv$qvframe[idx, ]
+  citations.qv.sorted <- citations.qv
+  citations.qv.sorted$qvframe <- qvframe.sorted
+  names.sorted <- rownames(citations.qv$qvframe)[idx]
+  plot(citations.qv.sorted, levelNames = names.sorted) 
+} else {
+  qvframe.sorted <- citations.qv$qvframe[rep(1:N), ]
+  citations.qv.sorted <- citations.qv
+  citations.qv.sorted$qvframe <- qvframe.sorted
+  names.sorted <- rownames(citations.qv$qvframe)[1:N]
+  plot(citations.qv.sorted, levelNames = names.sorted) 
+}
 
 ######################  END BradleyTerry2 package  #############################
-
-
 
 
 ###########################  BEGIN TDBT.Gibbs  #################################
 
 num.chains <- 1
-param.name <- "w"   # Options: (w, F.worths, V, worths)
-mcmc.results <- run.MCMCs(num.chains = num.chains, name = param.name, MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
+param.name <- "F.worths"  # Options: (w, gamma, F.worths, V, main, int, M, K)
+#w.prior <- seq(dimensionality, 1, -1)
+#w.prior <- w.prior / norm(w.prior, type = "2")
+w.prior <- database$w.true15
+mcmc.results <- run.MCMCs(num.chains = num.chains, name = param.name, 
+                          MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
                           X, K = dimensionality, mcmc = num.iter, burn = num.burn, 
-                          thin = 1, epsilon = 2e-1, rate = 1,
-                          w0.prior = rep(1, dimensionality), S0.prior = diag(dimensionality), 
-                          F.prior = matrix(0, nrow = dimensionality, ncol = N), 
+                          thin = 1, eps = 2e-1, rate = 0.6, adaptive = FALSE, 
+                          w.prior = w.prior, S0.prior = diag(dimensionality), 
+                          gamma.prior = 0, s0.prior = 1,
+                          F.prior = database$F.true15, #matrix(0, nrow = dimensionality, ncol = N), 
                           V.prior = rep(alpha, dimensionality), alpha = alpha)
 
 ## Extract MCMC sample for specified parameter (name)
 specific.mcmc <- mcmc.extract(mcmc.results$all.mcmc, param.name, rhat = FALSE, ess = FALSE)
 
 ## Represent information for the posterior of specified parameter.
-plot.MCMCs(num.chains, specific.mcmc, param.name) # plot MCMC sample path
+plot.MCMCs(num.chains, specific.mcmc, param.name)       # plot MCMC sample path
 plot.posteriors(num.chains, specific.mcmc, param.name)  # plot MCMC histgram
-plot.ACFs(num.chains, specific.mcmc, param.name)  # plot autocorrelation function (ACF)
-stats.posteriors(num.chains, specific.mcmc, param.name, decimal = 6) # compute the mean and median
+plot.ACFs(num.chains, specific.mcmc, param.name)        # plot autocorrelation function (ACF)
+stats.posteriors(num.chains, specific.mcmc, param.name, decimal = 6)  # compute the mean and median
 compute.CIs(num.chains, specific.mcmc, param.name, level = 0.95, decimal = 3, hpd = TRUE) # compute credible intervals
 
 ## Compare each MCMC chain
 plot.contributions(mcmc.results$all.mcmc, plot = TRUE, worth = FALSE)
-plot.worths(num.chains, mcmc.results$all.mcmc, names = entities.name, partition = FALSE, order = "desc", level = 1)
-stats.worths(num.chains, mcmc.results$all.mcmc, names = entities.name, partition = TRUE, order = NULL, decimal = 2)
+plot.worths(num.chains, mcmc.results$all.mcmc, names = entities.name,
+            partition = TRUE, order = NULL, level = 1, worth = FALSE)
+stats.worths(num.chains, mcmc.results$all.mcmc, names = entities.name, 
+             partition = TRUE, order = NULL, decimal = 2)
 
 # Label-switching diagnosis
 LabelSwitching.diag(num.chains, mcmc.extract(mcmc.results$all.mcmc, name = "worths"))
 LabelSwitching.diag(num.chains, mcmc.extract(mcmc.results$all.mcmc, name = "w"))
 
-############################  END TDBT.Gibbs  ##################################
+############=################  END TDBT.Gibbs  ##################################
