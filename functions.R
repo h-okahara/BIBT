@@ -4,26 +4,29 @@
 ###----------------------------------------------------###
 
 ## INPUT:
-# X:        An N×N matrix where the (i, j) entry indicates that player i defeats player j;
-# K0:       The dimensionality of the "worth" vector f;
-# mcmc:     Number of iterations;
-# burn:     Burn-in period;
-# thin:     A thinning interval;
-# epsilon:  threshold below which a dimension is considered negligible;
-# w0.prior: A K×1 vector representing the relative weight of each dimension in f;
-# S0.prior: A K×K matrix representing covariance matrix of weight vector;
-# F.prior:  A K×N matrix where each column f_i represents the worth vector of player i;
-# V.prior:  A K×1 vector where each value v_s (except v_1 = 1) follows a truncated Gamma distribution;
-#           in the range [1,ingty) with Ga(alpha, 1) distribution;
-# alpha:    A hyperparameter of the truncated Gamma distribution;
+# X:            An N×N matrix where the (i, j) entry indicates that player i defeats player j;
+# K0:           The dimensionality of the "worth" vector f;
+# mcmc:         Number of iterations;
+# burn:         Burn-in period;
+# thin:         A thinning interval;
+# eps:          threshold below which a dimension is considered negligible;
+# w.prior:      A K×1 vector representing the relative weight of each dimension in f;
+# S0.prior:     A K×K matrix representing covariance matrix of weight vector;
+# gamma.prior:  A scalar giving the prior mean of the interaction parameter γ;
+# s0.prior:     A positive scalar giving the prior variance of γ;
+# F.prior:      A K×N matrix where each column f_i represents the worth vector of player i;
+# V.prior:      A K×1 vector where each value v_s (except v_1 = 1) follows a truncated Gamma distribution;
+#               in the range [1,ingty) with Ga(alpha, 1) distribution;
+# alpha:        A hyperparameter of the truncated Gamma distribution;
 
 ## OUTPUT:
 # A list of MCMC samples for the parameters: omega, w, F, V.
 
 TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
-                       thin = 1, epsilon = 1e-3, rate = 1,
-                       w0.prior = NULL, S0.prior = NULL, F.prior = NULL, 
-                       V.prior = NULL, alpha = 3) {
+                       thin = 1, eps = 1e-3, rate = 1, adaptive = TRUE,
+                       w.prior = NULL, S0.prior = NULL, 
+                       gamma.prior = NULL, s0.prior = NULL,
+                       F.prior = NULL, V.prior = NULL, alpha = 3) {
   ## Preparation
   entity.name <- unique(c(X[ ,1], X[ ,2]))
   N <- length(entity.name)       # number of entities
@@ -35,9 +38,13 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
   
   ## Initial values
   K <- K0
-  w0 <- w <- w0.prior
+  K.upper <- trunc(N*(N-1)/(N+1))
+  w <- w0 <- w.prior
   S0 <- S0.prior
-  S0.inv <- solve(S0)
+  S0.inv <- solve(S0.prior)
+  gamma <- gamma0 <- gamma.prior
+  s0 <- s0.prior
+  s0.inv <- 1/(s0^2)
   F.worths <- F.prior
   V <- V.prior
   V[1] <- 1
@@ -45,9 +52,14 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
   alphas <- alphas0 <- rep(alpha, K0)
   betas <- betas0 <- rep(1, K0)
   kappa <- X$y_ij - X$n_ij/2
-  Phi <- matrix(NA, nrow = K, ncol = num.pairs)
+  Phi <- matrix(NA, nrow = num.pairs, ncol = K)
   Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
   omega <- rep(NA, num.pairs)
+  J_skew.mat <- matrix(0, K, K)
+  J_skew.mat[upper.tri(J_skew.mat)] <-  1
+  J_skew.mat[lower.tri(J_skew.mat)] <- -1
+  lambda_int <- colSums(F.worths[, pairs[,1], drop = FALSE] * (J_skew.mat[1:K, 1:K] %*% F.worths[, pairs[,2], drop = FALSE]))
+  M.vec <- Phi %*% w + gamma * lambda_int
   
   ## Hyperparameters for dimensionality decision
   a0 <- -1
@@ -62,254 +74,272 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
   for (iter in 1:mcmc) {
     # -----------------------  BEGIN Updating  ---------------------------------
     ## Updating omega
-    for (p in 1:num.pairs) {
-      omega[p] <- rpg(n = 1, h = X$n_ij[p], z = sum(w * Phi[p, ]))  # sample omega[p] from Pólya-Gamma distribution
-    }
+    omega <- rpg(n = num.pairs, h = X$n_ij, z = M.vec)  # sample omega[p] from Pólya-Gamma distribution
     
     ## Updating w
-    inv.part <- tryCatch({
-      solve(diag(1/omega) + Phi %*% S0 %*% t(Phi))
-      }, error = function(e) {
-      message("Error in computing inverse matrix in A.omega: ", e$message)
-      return(NULL)
-    })
-    A.omega <- S0 - S0 %*% t(Phi) %*% inv.part %*% Phi %*% S0  # Woodbury formula
-    B.omega <- t(Phi) %*% kappa + S0.inv %*% w0
-    w.mean <- as.vector(A.omega %*% B.omega)
-    w.Sigma <- A.omega
-    # w <- mvrnorm(1, mu = w.mean, Sigma = w.Sigma)
+    #inv.part <- tryCatch({
+    #  solve(diag(1/omega) + tcrossprod(Phi %*% S0, Phi))
+    #  }, error = function(e) {
+    #  message("Error in computing inverse matrix in A.omega: ", e$message)
+    #  return(NULL)
+    #})
+    #A_w <- S0 - tcrossprod(S0, Phi) %*% inv.part %*% Phi %*% S0  # Woodbury formula
+    ## A_w <- solve(S0.inv + crossprod(Phi, diag(omega)) %*% Phi)
+    #B_w <- crossprod(Phi, kappa - gamma * omega * lambda_int) + S0.inv %*% w0
+    #w.mean <- as.vector(A_w %*% B_w)
+    #w.Sigma <- A_w
+    ## w <- mvrnorm(1, mu = as.vector(w.mean), Sigma = w.Sigma)
     
-    for (k in 1:K) {
-      idx <- setdiff(1:K, k)
-      inv.part <- tryCatch({
-        solve(w.Sigma[idx, idx])
-      }, error = function(e) {
-        message("Error in computing inverse matrix in", k,"th off-diagonal block: ", e$message)
-        return(NULL)
-      })
-      mu.cond <- w.mean[k] + w.Sigma[k, idx] %*% inv.part %*% (w[idx] - w.mean[idx])
-      var.cond <- w.Sigma[k, k] - w.Sigma[k, idx] %*% inv.part %*% w.Sigma[idx, k]
-      
-      # Sampling from the truncated Normal distribution
-      birth  <- (iter <= burn+1) && (K > K.prev)    # TRUE only in a 'birth' step
-      
-      ## lower bound for the k-th component
-      if (iter == 1 || k == K || (birth && k >= K.prev)) {
-        lower <- 0
-      } else {
-        lower <- w[k + 1]
-      }
-      upper <- if (k == 1) Inf else w[k-1]
-      # cat("iter: ", iter, ", k: ", k, ", lower: ", lower, ", upper: ", upper, "\n")
-      w[k] <- rtnorm(n = 1, mu = as.numeric(mu.cond), sd = sqrt(var.cond),
-                     lb = lower, ub = upper)
-    }
+    #if (K >1) {
+    #  for (k in 1:K) {
+    #    idx <- setdiff(1:K, k)
+    #    inv.part <- tryCatch({
+    #      solve(w.Sigma[idx, idx])
+    #    }, error = function(e) {
+    #      message("Error in computing inverse matrix in", k,"th off-diagonal block: ", e$message)
+    #      return(NULL)
+    #    })
+    #    mu.cond <- w.mean[k] + w.Sigma[k, idx] %*% inv.part %*% (w[idx] - w.mean[idx])
+    #    var.cond <- w.Sigma[k, k] - w.Sigma[k, idx] %*% inv.part %*% w.Sigma[idx, k]
+        
+        # Sampling from the truncated Normal distribution
+    #    birth <- (iter <= burn+1) && (K > K.prev)    # TRUE only in a 'birth' step
+        
+        ## lower bound for the k-th component
+    #    if (iter == 1 || k == K || (birth && k >= K.prev)) {
+    #      lower <- 0
+    #    } else {
+    #      lower <- w[k + 1]
+    #    }
+    #    upper <- if (k == 1) Inf else w[k-1]
+    #    w[k] <- rtnorm(n = 1, mu = as.numeric(mu.cond), sd = sqrt(var.cond),
+    #                   lb = lower, ub = upper)
+    #  }
+    #} else {
+    #  w <- rtnorm(n = 1, mu = w.mean, sd = sqrt(w.Sigma), lb = 0, ub = Inf)
+    #}
+    w <- database$w.true15
+    
+    ## Updating gamma
+    #a_gamma <- 1/(s0.inv + crossprod(lambda_int, omega * lambda_int))
+    #b_gamma <- crossprod(lambda_int, kappa - omega * (Phi %*% w)) + gamma0 * s0.inv
+    ## gamma   <- rnorm(1, mean = as.numeric(a_gamma * b_gamma), sd = sqrt(a_gamma))
+    #gamma <- rtnorm(n = 1, mu = as.numeric(a_gamma %*% b_gamma), sd = sqrt(a_gamma), lb = 0, ub = Inf)
+    gamma <- database$gamma.true15
     
     ## Updating f_i for i = 1,...,N
     for (i in 1:N) {
-      # Compute omega_i and eta_i using the current state
+      # Compute Eta_i and B_f using the current state
       up.idx   <- which(pairs[, 1] == i)  # i<j
       down.idx <- which(pairs[, 2] == i)  # j<i
-      omega_i  <- sum(omega[c(up.idx, down.idx)])
-
-      eta_i <- 0
+      
+      Eta_i <- matrix(0, nrow = K, ncol = K)
+      B_f <- rep(0, K)
       if (length(up.idx)) { # i<j
-        eta_i <- eta_i + sum(kappa[up.idx] +
-                               omega[up.idx] * (t(w) %*% F.worths[, pairs[up.idx, 2], drop = FALSE])) 
+        eta_j <- w + gamma * (J_skew.mat[1:K, 1:K] %*% F.worths[, pairs[up.idx, 2], drop = FALSE]) # K × length(up.idx) matrix
+        F.up <- F.worths[, pairs[up.idx, 2], drop = FALSE]
+        kappa.up <- kappa[up.idx]
+        omega.up <- omega[up.idx]
+        # Eta_i <- Eta_i + eta_j %*% (omega[up.idx] * t(eta_j))  # K×K matrix
+        # B_f <- B_f + rowSums(eta_j * as.vector(t(w) %*% (F.worths[, pairs[up.idx, 2], drop = FALSE] * omega[up.idx]) + t(kappa[up.idx])))
+        for (u in seq_along(up.idx)) {
+          Eta_i <- Eta_i + omega.up[u] * (eta_j[,u] %*% t(eta_j[,u]))
+          B_f <- B_f + (omega.up[u] * as.numeric(t(w) %*% F.up[,u]) + kappa.up[u]) * eta_j[,u]
+        }
       }
       if (length(down.idx)) { # j<i
-        eta_i <- eta_i - sum(kappa[down.idx] -
-                               omega[down.idx] * (t(w) %*% F.worths[, pairs[down.idx, 1], drop = FALSE]))
+        eta_j <- w + gamma * (J_skew.mat[1:K, 1:K] %*% F.worths[, pairs[down.idx, 1], drop = FALSE]) # K × length(down.idx) matrix
+        F.down <- F.worths[, pairs[down.idx, 1], drop = FALSE]
+        kappa.down <- kappa[down.idx]
+        omega.down <- omega[down.idx]
+        # Eta_i <- Eta_i + eta_j %*% (omega[down.idx] * t(eta_j))  # K×K matrix
+        # B_f <- B_f + rowSums(eta_j * as.vector(t(w) %*% (F.worths[, pairs[down.idx, 2], drop = FALSE] * omega[down.idx]) + t(kappa[down.idx])))
+        for (d in seq_along(down.idx)) {
+          Eta_i <- Eta_i + omega.down[d] * (eta_j[,d] %*% t(eta_j[,d]))
+          B_f <- B_f + (omega.down[d] * as.numeric(t(w) %*% F.down[,d]) - kappa.down[d]) * eta_j[,d]
+        }
       }
       
       ## Draw f_i ~ N(A_f B_f, A_f)
-      tau.inv <- diag(1 / tau, K, K)
-      denom  <- (1 / omega_i) + t(w) %*% tau.inv %*% w
-      A_f    <- tau.inv - (tau.inv %*% w %*% t(w) %*% tau.inv) / as.numeric(denom)
-      B_f    <- eta_i * w
-      F.worths[, i] <- mvrnorm(1, mu = as.vector(A_f %*% B_f), Sigma = A_f)
+      if (K > 1) {
+        A_f    <- solve(diag(tau) + Eta_i)
+        F.worths[, i] <- mvrnorm(1, mu = as.vector(A_f %*% B_f), Sigma = A_f)
+      } else {
+        A_f    <- 1/(tau + Eta_i)
+        F.worths[, i] <- rnorm(1, mean = as.numeric(A_f * B_f), sd = sqrt(A_f))
+      }
     }
+
     
-    ## Updating Phi
+    ## Updating Phi, lambda_int and M.vec
     Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
+    lambda_int <- colSums(F.worths[, pairs[,1], drop = FALSE] * (J_skew.mat[1:K,1:K] %*% F.worths[, pairs[,2], drop = FALSE]))
+    M.vec <- Phi %*% w + gamma * lambda_int
+
     
     ## Updating v_s and tau_s for s = 2,...,K
     if (K > 1) {
       sq.F_k <- rowSums(F.worths^2)
-      alphas[2:K] <- alphas0[2:K] + (N/2) * (K-(2:K)+1)
+      alphas[2:K] <- alpha + (N/2) * (K-(2:K)+1)
       
       # Sampling from the truncated Gamma distribution
       for (s in 2:K) {
-        betas[s] <- betas0[s] + 0.5 * sum(tau[s:K] / V[s] * sq.F_k[s:K])
-        V[s] <- rtrunc(n = 1, spec = "gamma", a = 1, b = Inf, 
+        betas[s] <- betas0[s] + (1/2) * sum(tau[s:K] / V[s] * sq.F_k[s:K])
+        V[s] <- rtrunc(n = 1, spec = "gamma", a = 1, b = Inf,
                        shape = alphas[s], rate = betas[s])
+        # V[s] <- rgamma(n = 1, shape = alphas[s], rate = betas[s])
         tau <- cumprod(V)
       }
     } else if (K == 1) {
-      alphas <- alphas[1]
-      betas <- betas[1]
+      alphas <- alphas0[1]
+      betas <- betas0[1]
       V <- tau <- 1
     }
     # ------------------------  END Updating  ----------------------------------
     
-    if (iter > burn && (iter-burn) %% thin == 0) {  # Store posterior samples
-      sample.idx <- sample.idx + 1
-      
-      ## Remove location indeterminacy
-      # Here, either impose the sum-to-zero constraint or endpoint constraints.
-      row.means <- rowMeans(F.worths[, 1:N, drop = FALSE])
-      F.worths <- F.worths - row.means # centering
-      
-      ## Store posterior samples
-      w.pos[sample.idx, ] <- w * sd(F.worths[1,]) 
-      F.pos[sample.idx, , ] <- F.worths / sd(F.worths[1,]) 
-      V.pos[sample.idx, ] <- V
-      tau.pos[sample.idx, ] <- tau
-      worths.pos[sample.idx, ] <- w %*% F.worths[,1:N]
-    } else if (iter < burn) {
-      prop = rowSums(abs(F.worths) < epsilon)/N # proportion of elements in each row less than eps in magnitude
-      m_t = sum(prop >= rate)  # number of redundant columns
-      K.prev <- K
-      
-      if (runif(1) < exp(a0 + a1*iter)) {
-        ## Decide whether to add a new dimension (birth) or remove inactive ones (death)
-        if (iter > 20 && m_t == 0) { # Birth
-          if (K0 > K) {
-            K <- min(K + 1, K0)  # Update K
+    ## Adaptive Gibbs
+    if (adaptive) {
+      if (iter > burn && (iter-burn) %% thin == 0) {  # Store posterior samples
+        sample.idx <- sample.idx + 1
+        
+        ## Store posterior samples
+        const <- norm(w, type = "2")
+        w.pos[sample.idx, ]      <- w / const
+        gamma.pos[sample.idx, ]  <- gamma / (const^2)
+        F.pos[sample.idx, , ]    <- F.worths * const
+        V.pos[sample.idx, ]      <- V
+        tau.pos[sample.idx, ]    <- tau
+        main.pos[sample.idx, ] <- w %*% F.worths[,1:N]
+        int.pos[sample.idx, ]    <- gamma * lambda_int
+        M.pos[sample.idx, ]      <- Phi %*% w + gamma * lambda_int
+      } else if (iter <= burn) {
+        zero.prop <- rowSums(abs(F.worths) < eps)/N # proportion of elements in each row less than eps in magnitude
+        m_t <- sum(zero.prop >= rate) # number of redundant columns
+        K.prev <- K
+        
+        if (runif(1) < exp(a0 + a1*iter)) {
+          ## Decide whether to add a new dimension (birth) or remove inactive ones (death)
+          if (iter > 20 && m_t == 0) { # Birth
+            if (K < K.upper) {
+              K <- K + 1  # Update K
+              
+              w <- c(w, w.prior[K])
+              w0 <- c(w0, w.prior[K])
+              S0 <- S0.inv <- diag(K) 
+              F.worths <- rbind(F.worths, F.prior[K,])
+              V <- c(V, V.prior[K])
+              alphas <- c(alphas, alphas0[K])
+              betas <- c(betas, betas0[K])
+              tau <- cumprod(V)
+              
+              Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
+              lambda_int <- colSums(F.worths[, pairs[,1], drop = FALSE] * (J_skew.mat[1:K, 1:K] %*% F.worths[, pairs[,2], drop = FALSE]))
+              M.vec <- Phi %*% w + gamma * lambda_int
+            }
+          } else if (iter > 20 && m_t > 0) { # Death
+            keep.idx <- !(zero.prop >= rate)  # Dimensions to remove
             
-            w <- c(w, w0.prior[K])
-            F.worths <- rbind(F.worths, F.prior[K,])
-            Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
-            V <- c(V, V.prior[K])
-            alphas <- c(alphas, alphas0[K])
-            betas <- c(betas, betas0[K])
-            tau <- cumprod(V)
-            
-            w0 <- c(w0, w0.prior[K])
-            S0 <- S0.inv <- diag(K)
-          }
-        } else { # Death
-          remove.idx <- prop < rate  # Dimensions to remove
-          
-          # Shrink negligible dimensions
-          if (K > m_t && m_t != 0) {
-            K <- max(K - m_t, 1)  # Update K
-            
-            w <- w[remove.idx]
-            F.worths <- F.worths[remove.idx, , drop = FALSE]
-            Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
-            V <- V[remove.idx]
-            alphas <- alphas[remove.idx]
-            betas <- betas[remove.idx]
-            tau <- cumprod(V) 
-            
-            w0 <- w0[remove.idx]
-            S0 <- S0[remove.idx, remove.idx]
-            S0.inv <- S0.inv[remove.idx, remove.idx]
+            # Shrink negligible dimensions
+            if (m_t < K-1 && m_t != 0) { # 多次元制約
+              K <- K - m_t  # Update K
+              
+              w <- w[keep.idx]
+              w0 <- w0[keep.idx]
+              S0 <- S0[keep.idx, keep.idx]
+              S0.inv <- S0.inv[keep.idx, keep.idx]
+              F.worths <- F.worths[keep.idx, , drop = FALSE]
+              V <- V[keep.idx]
+              alphas <- alphas[keep.idx]
+              betas <- betas[keep.idx]
+              tau <- cumprod(V) 
+              
+              Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
+              lambda_int <- colSums(F.worths[, pairs[,1], drop = FALSE] * (J_skew.mat[1:K, 1:K] %*% F.worths[, pairs[,2], drop = FALSE]))
+              M.vec <- Phi %*% w + gamma * lambda_int
+            }
           }
         }
-      }
-      K.pos[iter] <- K  # Store optimal dimensionality
-      
-      ## Remove location indeterminacy
-      ## Here, either impose the sum-to-zero constraint or endpoint constraints.
-      if (K > 1) {
-        row.means <- rowMeans(F.worths[, 1:N])
-        F.worths <- F.worths - row.means # centering
-      } else if (K == 1) {
-        row.means <- mean(F.worths[, 1:N])
-        F.worths <- F.worths - row.means # centering
-      }
-    } else if (iter == burn) {
-      prop = rowSums(abs(F.worths) < epsilon)/N # proportion of elements in each row less than eps in magnitude
-      m_t = sum(prop >= rate)  # number of redundant columns
-      K.prev <- K
-      
-      if (runif(1) < exp(a0 + a1*iter)) {
-        ## Decide whether to add a new dimension (birth) or remove inactive ones (death)
-        if (m_t == 0) { # Birth
-          if (K0 > K) {
-            K <- min(K + 1, K0)  # Update K
-            
-            w <- c(w, w0.prior[K])
-            F.worths <- rbind(F.worths, F.prior[K,])
-            Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
-            V <- c(V, V.prior[K])
-            alphas <- c(alphas, alphas0[K])
-            betas <- c(betas, betas0[K])
+        K.pos[iter] <- K  # Store optimal dimensionality
+        
+        if (iter == burn) {
+          # K.optimal <- median(K.pos[1:iter])  # Determined dimensionality
+          K.unique <- unique(K.pos[1:iter])
+          K.optimal <- K.unique[which.max(tabulate(match(K.pos[1:iter], K.unique)))]
+          
+          ## Adjust dimensionality of each parameter
+          if (K < K.optimal) { # Birth
+            w <- c(w, w.prior[(K+1):K.optimal])
+            w0 <- c(w0, w.prior[(K+1):K.optimal])
+            S0 <- S0.inv <- diag(K.optimal)
+            F.worths <- rbind(F.worths, F.prior[(K+1):K.optimal,])
+            V <- c(V, V.prior[(K+1):K.optimal])
+            alphas <- c(alphas, alphas0[(K+1):K.optimal])
+            betas <- c(betas, betas0[(K+1):K.optimal])
             tau <- cumprod(V)
             
-            w0 <- c(w0, w0.prior[K])
-            S0 <- S0.inv <- diag(K)
-          }
-        } else { # Death
-          remove.idx <- prop < rate  # Dimensions to remove
-          
-          # Shrink negligible dimensions
-          if (K > m_t && m_t != 0) {
-            K <- max(K - m_t, 1)  # Update K
-            
-            w <- w[remove.idx]
-            F.worths <- F.worths[remove.idx, , drop = FALSE]
             Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
-            V <- V[remove.idx]
-            alphas <- alphas[remove.idx]
-            betas <- betas[remove.idx]
+            lambda_int <- colSums(F.worths[, pairs[,1], drop = FALSE] * (J_skew.mat[1:K.optimal, 1:K.optimal] %*% F.worths[, pairs[,2], drop = FALSE]))
+            M.vec <- Phi %*% w + gamma * lambda_int
+          } else if (K.optimal < K) { # Death
+            w <- w[1:K.optimal]
+            w0 <- w0[1:K.optimal]
+            S0 <- S0.inv <- diag(K.optimal)
+            F.worths <- F.worths[1:K.optimal, , drop = FALSE]
+            V <- V[1:K.optimal]
+            alphas <- alphas[1:K.optimal]
+            betas <- betas[1:K.optimal]
             tau <- cumprod(V) 
             
-            w0 <- w0[remove.idx]
-            S0 <- S0[remove.idx, remove.idx]
-            S0.inv <- S0.inv[remove.idx, remove.idx]
+            Phi <- t(F.worths[, pairs[,1], drop = FALSE] - F.worths[, pairs[,2], drop = FALSE])
+            lambda_int <- colSums(F.worths[, pairs[,1], drop = FALSE] * (J_skew.mat[1:K.optimal, 1:K.optimal] %*% F.worths[, pairs[,2], drop = FALSE]))
+            M.vec <- Phi %*% w + gamma * lambda_int
           }
+          
+          ## Define matrices for posterior samples
+          mcmc.row   <- ((mcmc-burn) - (mcmc-burn) %% thin) / thin
+          w.pos      <- matrix(0, nrow = mcmc.row, ncol = K.optimal)
+          gamma.pos  <- matrix(0, nrow = mcmc.row, ncol = 1)
+          F.pos      <- array(0, dim = c(mcmc.row, K.optimal, N))
+          V.pos      <- matrix(0, nrow = mcmc.row, ncol = K.optimal)
+          tau.pos    <- matrix(0, nrow = mcmc.row, ncol = K.optimal)
+          main.pos   <- matrix(0, nrow = mcmc.row, ncol = N)
+          int.pos    <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
+          M.pos      <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
+          K          <- K.optimal
         }
       }
-      K.pos[iter] <- K  # Store optimal dimensionality
-      K.optimal <- median(K.pos[1:iter])  # Determined dimensionality
-      
-      ## Adjust dimensionality of each parameter
-      if (K.optimal > K) { # Birth
-        w <- c(w, w0.prior[(K+1):K.optimal])
-        F.worths <- rbind(F.worths, F.prior[(K+1):K.optimal,])
-        Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
-        V <- c(V, V.prior[(K+1):K.optimal])
-        alphas <- c(alphas, alphas0[(K+1):K.optimal])
-        betas <- c(betas, betas0[(K+1):K.optimal])
-        tau <- cumprod(V)
+    } else { # non-adaptive
+      if (iter > burn) {
+        sample.idx <- sample.idx + 1
         
-        w0 <- c(w0, w0.prior[(K+1):K.optimal])
-        S0 <- S0.inv <- diag(K.optimal)
-      } else if (K.optimal < K) { # Death
-        w <- w[1:K.optimal]
-        F.worths <- F.worths[1:K.optimal, , drop = FALSE]
-        Phi <- t(F.worths[, pairs[,1]] - F.worths[, pairs[,2]])
-        V <- V[1:K.optimal]
-        alphas <- alphas[1:K.optimal]
-        betas <- betas[1:K.optimal]
-        tau <- cumprod(V) 
-        
-        w0 <- w0[1:K.optimal]
-        S0 <- S0.inv <- diag(K.optimal)
+        ## Store posterior samples
+        const <- norm(w, type = "2")
+        w.pos[sample.idx, ]      <- w / const
+        gamma.pos[sample.idx, ]  <- gamma / (const^2)
+        F.pos[sample.idx, , ]    <- F.worths * const
+        V.pos[sample.idx, ]      <- V
+        tau.pos[sample.idx, ]    <- tau
+        main.pos[sample.idx, ] <- crossprod(w, F.worths)
+        int.pos[sample.idx, ]    <- gamma * lambda_int
+        M.pos[sample.idx, ]      <- Phi %*% w + gamma * lambda_int
+      } else if (iter == burn) {
+        ## Define matrices for posterior samples
+        mcmc.row   <- ((mcmc-burn) - (mcmc-burn) %% thin) / thin
+        w.pos      <- matrix(0, nrow = mcmc.row, ncol = K)
+        gamma.pos  <- matrix(0, nrow = mcmc.row, ncol = 1)
+        F.pos      <- array(0, dim = c(mcmc.row, K, N))
+        V.pos      <- matrix(0, nrow = mcmc.row, ncol = K)
+        tau.pos    <- matrix(0, nrow = mcmc.row, ncol = K)
+        main.pos <- matrix(0, nrow = mcmc.row, ncol = N)
+        int.pos    <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
+        M.pos    <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
       }
-      
-      ## Remove location indeterminacy
-      ## Here, either impose the sum-to-zero constraint or endpoint constraints.
-      row.means <- rowMeans(F.worths[, 1:N, drop = FALSE])
-      F.worths <- F.worths - row.means # centering
-      
-      ## Define matrices for posterior samples
-      mcmc.row <- ((mcmc-burn) - (mcmc-burn) %% thin) / thin
-      w.pos <- matrix(0, nrow = mcmc.row, ncol = K.optimal)
-      F.pos <- array(0, dim = c(mcmc.row, K.optimal, N))
-      V.pos <- matrix(0, nrow = mcmc.row, ncol = K.optimal)
-      tau.pos <- matrix(0, nrow = mcmc.row, ncol = K.optimal)
-      worths.pos <- matrix(0, nrow = mcmc.row, ncol = N)
-      K <- K.optimal
     }
   }
   #=======================   END MCMC sampling   ===============================
   
-  result <- list(w = w.pos, F.worths = F.pos, V = V.pos, tau = tau.pos,
-                 worths = worths.pos, K = K.pos)
+  result <- list(w = w.pos, gamma = gamma.pos, F.worths = F.pos, V = V.pos, 
+                 tau = tau.pos, main = main.pos, int = int.pos, M = M.pos, K = K.pos)
   return(result)
 }
 
@@ -337,10 +367,11 @@ TDBT.Gibbs <- function(X, K0 = NULL, mcmc = 30000, burn = 5000,
 ## OUTPUT:
 # A list of MCMC draws from multiple chains.
 
-run.MCMCs <- function(num.chains = 1, name, MCMC.plot = TRUE, rhat = FALSE, ess = FALSE,
+run.MCMCs <- function(num.chains = 1, name, MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
                       X, K = 100, mcmc = 10000, burn = 2000, 
-                      thin = 1, epsilon = 1e-1, rate = 1,
-                      w0.prior = rep(1, 100), S0.prior = diag(100), 
+                      thin = 1, eps = 1e-3, rate = 1, adaptive = TRUE,
+                      w.prior = rep(1, 100), S0.prior = diag(100), 
+                      gamma.prior = 0.1, s0.prior = 1,
                       F.prior = matrix(0, nrow = 100, ncol = NULL), 
                       V.prior = rep(1, 100), alpha = 3) {
   start.time <- Sys.time()
@@ -350,8 +381,9 @@ run.MCMCs <- function(num.chains = 1, name, MCMC.plot = TRUE, rhat = FALSE, ess 
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(73 + chain.id)
       TDBT.Gibbs(X, K = K, mcmc = mcmc, burn = burn,
-                 thin = thin, epsilon = epsilon, rate = rate,
-                 w0.prior = w0.prior, S0.prior = S0.prior, 
+                 thin = thin, eps = eps, rate = rate, adaptive = adaptive,
+                 w.prior = w.prior, S0.prior = S0.prior, 
+                 gamma.prior = gamma.prior, s0.prior = s0.prior,
                  F.prior = F.prior, V.prior = V.prior, alpha = alpha)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
   } else {
@@ -410,8 +442,7 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains, name) {
       }
     }
     mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
-    
-  } else {
+  } else if (name == "F.worths") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     K <- dim(mcmc.chains[[1]])[2]
     N <- dim(mcmc.chains[[1]])[3]
@@ -550,18 +581,25 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, param.name, decimal = 
       mcmc <- dim(mcmc.chains[[chain]])[1]
       K  <- dim(mcmc.chains[[chain]])[2]
       N <- dim(mcmc.chains[[chain]])[3]
+      mean.mat <- matrix(NA, nrow = K, ncol = N)
+      median.mat  <- matrix(NA, nrow = K, ncol = N)
       
       ## Compute the mean and median
       for (e in 1:N) {
-        means <- apply(mcmc.chains[[chain]][, , e], 2, mean)
-        medians <- apply(mcmc.chains[[chain]][, , e], 2, median)
-        stats <- data.frame(Variable = paste0("f_", e, 1:K),
-                            Mean = round(means, decimal),
-                            Median = round(medians, decimal))
-        print(stats, row.names = FALSE)
-        cat("\n")
+        samples <- mcmc.chains[[chain]][, , e]  # iter × K matrix
+        mean.vec <- apply(samples, 2, mean)
+        median.vec  <- apply(samples, 2, median)
+        mean.mat[, e] <- round(mean.vec, decimal)
+        median.mat[, e]  <- round(median.vec, decimal)
       }
-      cat("----------------------------\n")
+      rownames(mean.mat) <- rownames(median.mat) <- paste0("Dimension", 1:K)
+      colnames(mean.mat) <- colnames(median.mat) <- paste("Entity", 1:N)
+      
+      cat("Means: \n")
+      print(mean.mat)
+      cat("\n Median: \n")
+      print(median.mat)
+      cat("\n----------------------------\n")
     }
   } else {
     for (chain in 1:num.chains) {
@@ -573,8 +611,8 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, param.name, decimal = 
       means <- apply(mcmc.chains[[chain]], 2, mean)
       medians <- apply(mcmc.chains[[chain]], 2, median)
       stats <- data.frame(Variable = paste0(param.name, "_", 1:K),
-                          Mean = round(means, decimal),
-                          Median = round(medians, decimal))
+                          Mean     = round(means, decimal),
+                          Median   = round(medians, decimal))
       print(stats, row.names = FALSE)
       cat("----------------------------\n")
     }
@@ -780,37 +818,39 @@ compute.CIs <- function(num.chains = 1, mcmc.chains, name, level = 0.95, decimal
 plot.contributions <- function(chains, plot = TRUE, worth = FALSE) {
   ## Preparation
   num.chains <- length(chains)
-  F.worths <- lapply(chains, function(chain) chain[["F.worths"]]) # mcmc × K × N
+  a <- lapply(chains, function(chain) chain[["a"]]) # mcmc × 1
   w <- lapply(chains, function(chain) chain[["w"]]) # mcmc × K
+  F.worths <- lapply(chains, function(chain) chain[["F.worths"]]) # mcmc × K × N
   mcmc <- dim(F.worths[[1]])[1]
   K <- dim(F.worths[[1]])[2]
   N <- dim(F.worths[[1]])[3]
 
   ## Helper function: compute per‐iteration contribution vector from F.worths (and w)
-  compute.contribution <- function(F.worths_t, w_t = NULL, worth.flag = FALSE) {
-    V_t <- apply(F.worths_t, 1, var)
+  compute.contribution <- function(a_t, F.worths_t, w_t = NULL, worth.flag = FALSE) {
     if (worth.flag) {
-      (w_t^2) * V_t / sum((w_t^2) * V_t)
+      V_t <- apply(a_t * w_t * F.worths_t, 1, var)
     } else {
-      V_t / sum(V_t)
+      V_t <- apply(F.worths_t, 1, var)
     }
+    V_t / sum(V_t)
   }
   
   ## Compute R for every chain and iteration
   R.list <- lapply(seq_len(num.chains), function(ch) {
     t(sapply(seq_len(mcmc), function(t) {
-      compute.contribution(F.worths[[ch]][t, , ], w[[ch]][t, ], worth)
+      compute.contribution(a[[ch]][t], F.worths[[ch]][t, , ], w[[ch]][t, ], worth)
     }))
   })
   
   ## Posterior means and 95% CI for each chain
-  R.means <- sapply(R.list, colMeans)
+  cat("Contributions of each dimension is \n")
+  R.means <- array(NA, c(K, num.chains))
   R.CI <- array(NA, c(2, K, num.chains))
   for (ch in seq_len(num.chains)) {
+    R.means[ , ch] <- colMeans(R.list[[ch]])
     R.CI[ , , ch] <- apply(R.list[[ch]], 2, quantile, probs = c(0.025, 0.975))
+    cat("Chain", ch, ": [", R.means[ , ch], "] \n")
   }
-  cat("Contributions of each dimension is \n")
-  cat("[", R.means, "] \n")
   
   ## Plot: grouped barplot by chain
   if (plot) {
@@ -843,12 +883,13 @@ plot.contributions <- function(chains, plot = TRUE, worth = FALSE) {
 # partition:   Logical flag; if TRUE, represent contributions for each entity and each dimension;
 # order:       Ordering flag to change the order of entities (e.g., "asc" and "desc");
 # level:       The visible interval level (e.g., 0.95);
+# worth:        Logical flag; if TRUE, compute weight adjusted contributions;
 
 ## OUTPUT:
 # Creates a grouped violin plot for each latent dimension's contribution.
 
 plot.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE, 
-                        order = NULL, level = 0.95) {
+                        order = NULL, level = 0.95, worth = FALSE) {
   ## Preparation
   dims <- dim(chains[[1]]$F.worths)
   iter <- dims[1]
@@ -866,8 +907,12 @@ plot.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
       chain.F.worths <- chains[[chain]]$F.worths
       
       for (k in 1:K) {
-        chain.worths <- chain.w[, k] * chain.F.worths[, k, ]
-        chain.worths <- chain.worths - mean(chain.worths[, N])
+        if (worth) {
+          chain.worths <- chain.F.worths[, k, ] * chain.w[, k]
+        } else {
+          chain.worths <- chain.F.worths[, k, ]
+        }
+        chain.worths <- chain.worths - rowMeans(chain.worths)
         
         # Convert to long format data frame:
         df.list[[length(df.list) + 1]] <- data.frame(
@@ -881,7 +926,7 @@ plot.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
   } else {
     for (chain in 1:num.chains) {
       chain.worths <- chains[[chain]]$worths
-      chain.worths <- chain.worths - mean(chain.worths[, N])
+      chain.worths <- chain.worths - rowMeans(chain.worths)
       
       # Convert to long format data frame:
       df.list[[chain]] <- data.frame(
@@ -894,12 +939,13 @@ plot.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
   data.all <- do.call(rbind, df.list)
   
   ## Get sorting entities in descending or ascending order.
-  if (order == "desc") {
-    data.all$name <- fct_reorder(data.all$name, data.all$worth, .fun = mean, .desc = TRUE)
-  } else if (order == 'asc') {
-    data.all$name <- fct_reorder(data.all$name, data.all$worth, .fun = mean, .desc = FALSE)
+  if (!is.null(order)) {
+    if (order == "desc") {
+      data.all$name <- fct_reorder(data.all$name, data.all$worth, .fun = mean, .desc = TRUE)
+    } else if (order == 'asc') {
+      data.all$name <- fct_reorder(data.all$name, data.all$worth, .fun = mean, .desc = FALSE)
+    }
   }
-    
   
   ## if level is specified, trim data.
   if (!is.null(level)) {
@@ -930,6 +976,7 @@ plot.worths <- function(num.chains = 1, chains, names = NULL, partition = TRUE,
                    position = position_dodge(width = 0.8),
                    shape = 18, size = 3, color = "black") +
       facet_wrap(~ dimension, nrow = K, scales = "free_y") +
+      coord_cartesian(ylim = c(-3, 3)) + 
       labs(title = "Dimension-wise Worth Contributions", x = "Entity", y = "Contributions") +
       theme_bw() +
       theme(legend.position = "top",
@@ -1057,7 +1104,7 @@ LabelSwitching.diag <- function(num.chains = 1, mcmc.chains, decimal = 4,
     
     # Trace plot
     matplot(mcmc.chains[[chain]], type = "l", lty = 1, col = rainbow(N),
-            xlab = "iteration", ylab = "w", main = "Trace of worths")
+            xlab = "iteration", ylab = "w", main = "Trace Plot")
     legend("topleft", legend = paste0("Entity", 1:N), col = rainbow(N), lty = 1, cex = .6)
     
     # Heat map of permutation
