@@ -192,6 +192,71 @@ generate.F.true <- function(N = NULL, K = NULL, decay = NULL, seed = 73) {
 
 
 
+###--------------------------###
+###    Plot latent score     ###
+###--------------------------###
+
+plot.scores <- function(F.worths = NULL, w = NULL, point.labels = NULL, add.arrows = FALSE,
+                        point.size = 1, text.vjust = -0.8, seed.jitter = 73) {
+  
+  if (is.null(dim(F.worths)) || nrow(F.worths) != 2)
+    stop("F.worths must be a 2 × N matrix (K = 2).")
+  N <- ncol(F.worths)
+  df <- data.frame(x = F.worths[1, ],
+                   y = F.worths[2, ],
+                   name = if (is.null(point.labels)) paste0("f", 1:N) else point.labels)
+
+  if (!is.null(w)) {
+    w <- w / norm(w, type = "2")
+    df <- df %>%
+      rowwise() %>%
+      mutate(
+        proj.scalar = c(x, y) %*% w,
+        x.proj = proj.scalar * w[1],
+        y.proj = proj.scalar * w[2]
+      ) %>%
+      ungroup()
+  }
+  
+  p <- ggplot(df, aes(x, y)) +
+    theme_bw() +
+    coord_equal(xlim = c(-2, 2), ylim = c(-2, 2)) +
+    xlab(expression(f[1])) +
+    ylab(expression(f[2])) +
+    geom_hline(yintercept = 0, colour = "grey75") +
+    geom_vline(xintercept = 0, colour = "grey75") +
+    geom_point(size = point.size, colour = "steelblue")
+  
+  if (add.arrows && !is.null(w)) {
+    line.range <- 4
+    line.data <- data.frame(
+      x = -line.range * w[1],
+      y = -line.range * w[2],
+      xend = line.range * w[1],
+      yend = line.range * w[2]
+    )
+    
+    p <- p +
+      geom_segment(aes(xend = x.proj, yend = y.proj),
+                   arrow = arrow(length = unit(0.1, "cm")),
+                   colour = "darkorange", alpha = 0.6) +
+      geom_point(aes(x = x.proj, y = y.proj),
+                 colour = "firebrick", size = 2) +
+      geom_segment(data = line.data,
+                   aes(x = x, y = y, xend = xend, yend = yend),
+                   inherit.aes = FALSE, colour = "black", linetype = "dashed")
+  }
+
+  if (!is.null(point.labels)) {
+    p <- p +
+      geom_text(aes(label = name), vjust = text.vjust, size = 3)
+  }
+  return(p)
+}
+
+
+
+
 ###------------------------------###
 ###    Create artificial data    ###
 ###------------------------------###
@@ -215,7 +280,7 @@ Create.Artificial.Data <- function(num.freq = NULL, w0 = NULL, F0 = NULL, gamma0
   for (i in 1:(N-1)) {
     for (j in (i+1):N) {
       M_ij <- as.numeric(crossprod(w0, F0[, i] - F0[, j]) 
-                         + crossprod(F0[, i], Gamma %*% F0[, j]))
+                         + crossprod(F0[, i] / norm(F0[, i],"2"), Gamma %*% (F0[, j] / norm(F0[, j], "2"))))
       p_ij <- 1 / (1 + exp(-M_ij))
       win.freq <- rbinom(1, size = num.freq, prob = p_ij)
       result[i, j] <- win.freq
@@ -230,11 +295,25 @@ Create.Artificial.Data <- function(num.freq = NULL, w0 = NULL, F0 = NULL, gamma0
 N <- 10
 database$K0.true10 <- 2
 database$artificial.name10 <- paste("Entity", 1:N)
-database$gamma.true10 <- 1.5
-database$w.true10 <- c(1, 0.8)
+database$gamma.true10 <- 1
+database$w.true10 <- c(1, 0.7)
 database$w.true10 <- database$w.true10 / norm(database$w.true10, type = "2")
-database$F.true10 <- generate.F.true(N = N, K = database$K0.true10, decay = 0.7, seed = 73)
+database$F.true10 <- generate.F.true(N = N, K = database$K0.true10, decay = 0.6, seed = 73)
 # worths <- crossprod(database$w.true10, database$F.true10)
+
+# Plot database$F.true10
+plot.scores(database$F.true10, database$w.true10, 
+            point.labels = database$artificial.name10, add.arrows = TRUE)
+
+J_skew.mat <- matrix(0, database$K0.true10, database$K0.true10)
+J_skew.mat[upper.tri(J_skew.mat)] <-  1
+J_skew.mat[lower.tri(J_skew.mat)] <- -1
+Gamma  <- database$gamma.true10 * J_skew.mat
+
+# TRUE
+main.true <- crossprod(database$w.true10, database$F.true10[,1]-database$F.true10[,2])
+int.true <- crossprod(database$F.true10[,1], Gamma %*% database$F.true10[,2])
+main.true + int.true
 
 # rowVars(database$F.true10)
 # rowSds(database$F.true10)
@@ -257,11 +336,11 @@ database$artificial.10$y_ij <- database$artificial.10$win1
 
 
 
-# Generate artificial data for 30 entities
+# Generate artificial data for 15 entities
 N <- 15
 database$K0.true15 <- 3
 database$artificial.name15 <- paste("Entity", 1:N)
-database$gamma.true15 <- 0.8
+database$gamma.true15 <- 1
 database$w.true15 <- c(1, 0.9, 0.8)
 database$w.true15 <- database$w.true15 / norm(database$w.true15, type = "2")
 database$F.true15 <- generate.F.true(N = N, K = database$K0.true15, decay = 0.3, seed = 73)
@@ -283,19 +362,6 @@ rownames(database$artificial.15) <-
 database$artificial.15 <- countsToBinomial(database$artificial.15)
 database$artificial.15$n_ij <- database$artificial.15$win1 + database$artificial.15$win2
 database$artificial.15$y_ij <- database$artificial.15$win1
-
-
-########################### BEGIN Test #########################################
-
-# J_skew.mat <- matrix(0, database$K0.true15, database$K0.true15)
-# J_skew.mat[upper.tri(J_skew.mat)] <-  1
-# J_skew.mat[lower.tri(J_skew.mat)] <- -1
-# Gamma  <- database$gamma.true15 * J_skew.mat
-
-# TRUE
-# main.true <- crossprod(database$w.true15, database$F.true15[,1]-database$F.true15[,2])
-# int.true <- crossprod(database$F.true15[,1], Gamma %*% database$F.true15[,2])
-# main.true + int.true
 
 
 
