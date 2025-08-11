@@ -24,5 +24,7 @@ library(ggplot2)
 library(ggpol)
 library(dplyr)
 library(forcats)
+library(igraph)
+library(scales)
 
 #########################  END import libraries  ###############################
