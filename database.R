@@ -46,8 +46,7 @@ rownames(citation.matrix) <-
 database$citations.6 <- countsToBinomial(t(citation.matrix))
 database$citations.6$n_ij <- database$citations.6$win1 + database$citations.6$win2
 database$citations.6$y_ij <- database$citations.6$win1
-
-
+# plot.network(database$citations.6, weight = "prop", layout = "fr")
 
 
 # Cross-citations involving statistics journals, giving total citations for the years 1987-89. 
@@ -81,7 +80,7 @@ rownames(citation.matrix) <-
 database$citations.8 <- countsToBinomial(t(citation.matrix))
 database$citations.8$n_ij <- database$citations.8$win1 + database$citations.8$win2
 database$citations.8$y_ij <- database$citations.8$win1
-
+# plot.network(database$citations.8, weight = "prop", layout = "fr")
 
 
 
@@ -118,7 +117,7 @@ rownames(citation.matrix) <-
 database$citations.9 <- countsToBinomial(t(citation.matrix))
 database$citations.9$n_ij <- database$citations.9$win1 + database$citations.9$win2
 database$citations.9$y_ij <- database$citations.9$win1
-
+# g.9 <- plot.network(database$citations.9, weight = "prop", layout = "fr")
 
 
 # Real-world data (Sumo) Pairwise Comparison Data from 2005 to 2009
@@ -184,10 +183,50 @@ generate.F.true <- function(N = NULL, K = NULL, decay = NULL, seed = 73) {
   F.true <- generate.F.worths(N = N, K = K, decay = decay, seed = seed)
   
   ## Sort the original column f_i into a descending index
-  F.true[1, ] <- sort(F.true[1, ], decreasing = TRUE)
-  F.true[2, ] <- sort(F.true[2, ], decreasing = FALSE)
+  #F.true[1, ] <- sort(F.true[1, ], decreasing = TRUE)
+  #F.true[2, ] <- sort(F.true[2, ], decreasing = FALSE)
   return(F.true)
 }
+
+
+
+
+###-----------------------###
+###    Generate M.true    ###
+###-----------------------###
+
+generate.M.true <- function(N = NULL, K = NULL, F.worths = NULL, w = NULL, gamma = NULL) {
+  ## Preparation
+  m <- floor(K/2)
+  stopifnot(length(gamma) == m)
+  pairs <- t(combn(N, 2))
+  J.mat <- matrix(c(0, 1, -1, 0), nrow = 2, byrow = TRUE)
+  
+  # build block-diagonal Gamma (K x K)
+  Gamma <- matrix(0, K, K)
+  if (m > 0) {
+    for (r in seq_len(m)) {
+      idx <- (2*r - 1):(2*r)
+      Gamma[idx, idx] <- gamma[r] * J.mat
+    }
+  }
+  
+  # transitive term: Phi %*% w
+  Phi <- t(F.worths[, pairs[, 1], drop = FALSE] - F.worths[, pairs[, 2], drop = FALSE])
+  trans.true <- as.vector(Phi %*% w)
+  
+  # intransitive term: for each pair (i,j), f_i^T Gamma f_j
+  f_i <- F.worths[, pairs[, 1], drop = FALSE]
+  f_j <- F.worths[, pairs[, 2], drop = FALSE]
+  int.true <- as.vector(colSums(f_i * (Gamma %*% f_j)))
+  
+  # match-up function: M.true = trans.true + int.true
+  M.true <- trans.true + int.true
+  result <- cbind(trans.true, int.true, M.true)
+  colnames(result) <- c("trans", "int", "M")
+  return(result)
+}
+
 
 
 
@@ -198,9 +237,9 @@ generate.F.true <- function(N = NULL, K = NULL, decay = NULL, seed = 73) {
 
 plot.scores <- function(F.worths = NULL, w = NULL, point.labels = NULL, add.arrows = FALSE,
                         point.size = 1, text.vjust = -0.8, seed.jitter = 73) {
-  
-  if (is.null(dim(F.worths)) || nrow(F.worths) != 2)
+  if (is.null(dim(F.worths)) || nrow(F.worths) != 2) {
     stop("F.worths must be a 2 × N matrix (K = 2).")
+  }
   N <- ncol(F.worths)
   df <- data.frame(x = F.worths[1, ],
                    y = F.worths[2, ],
@@ -257,19 +296,106 @@ plot.scores <- function(F.worths = NULL, w = NULL, point.labels = NULL, add.arro
 
 
 
+###--------------------------###
+###    Plot match network    ###
+###--------------------------###
+
+plot.network <- function(bin_df, weight = c("diff", "prop"), edge.label = FALSE,  
+                         layout = c("fr", "circle"), tie_mode = c("skip", "thin")) 
+  {
+  ## Preparation
+  weight <- match.arg(weight)
+  layout <- match.arg(layout)
+  tie_mode <- match.arg(tie_mode)
+  
+  ## Setting nodes and edges
+  nodes_df <- data.frame(name = sort(unique(c(bin_df$player1, bin_df$player2))))
+  edges_df <- bin_df %>%
+    mutate(
+      is_tie = (win1 == win2),
+      winner = if_else(win1 > win2, player1, player2),
+      loser  = if_else(win1 > win2, player2, player1),
+      w_win  = pmax(win1, win2),
+      w_lose = pmin(win1, win2),
+      metric = case_when(
+        weight == "diff"  ~ w_win - w_lose,
+        weight == "prop"  ~ w_win / w_lose
+      ),
+      label = paste(w_win, w_lose, sep = "-")
+    ) 
+  if (tie_mode == "skip") {
+    edges_df <- edges_df %>% filter(!is_tie)
+  }
+  edges_df <- edges_df %>%
+    select(
+      from = winner,
+      to   = loser,
+      metric,
+      label
+    )
+  
+  ## Define graph object
+  g <- graph_from_data_frame(vertices = nodes_df, d = edges_df, directed = TRUE)
+  if (length(unique(E(g)$metric)) > 1) {
+    E(g)$width <- rescale(E(g)$metric, to = c(0.5, 3)) # scaling width of all edges
+  } else {
+    E(g)$width <- 3
+  }
+  layout_coords <- switch(layout,
+                          fr     = layout_with_fr(g),
+                          circle = layout_in_circle(g))
+  
+  ## Detect cyclic structures and highlight them
+  scc <- components(g, mode = "strong")
+  memb <- scc$membership
+  csize <- scc$csize
+  eH <- as.integer(head_of(g, E(g)))  # 辺の終点
+  eT <- as.integer(tail_of(g, E(g)))  # 辺の始点
+  same_scc <- memb[eH] == memb[eT]
+  scc_gt1  <- csize[memb[eH]] > 1
+  loop_e   <- which_loop(g)           # 自己ループは常にサイクル
+  on_cycle <- (same_scc & scc_gt1) | loop_e
+  E(g)$color <- rgb(0.2, 0.5, 0.9, 1)
+  E(g)[on_cycle]$color <- rgb(1, 0.1, 0.3, 1)
+
+  ## Plot network graph
+  plot(g,
+       layout = layout_coords,
+       vertex.size = 30,
+       vertex.color = "grey95",
+       vertex.frame.color = "grey40",
+       vertex.label.color = "grey10",
+       edge.width = E(g)$width,
+       edge.color = E(g)$color,
+       edge.arrow.size = 0.8,
+       edge.curved = 0.1,
+       edge.label = if (edge.label) E(g)$label else NA,
+       edge.label.color = "grey20",
+       main = sprintf("Pairwise Win Network (weight: %s)", weight)
+  )
+  return(g)
+}
+
+
 ###------------------------------###
 ###    Create artificial data    ###
 ###------------------------------###
 
-Create.Artificial.Data <- function(num.freq = NULL, w0 = NULL, F0 = NULL, gamma0 = 0, seed = 73) {
+Create.Artificial.Data <- function(num.freq = NULL, w0 = NULL, F0 = NULL, 
+                                   gamma0 = NULL, seed = 73) {
   N <- ncol(F0) # number of entities
   K <- nrow(F0) # dimensionality of each entity
   
-  ## Make skew-symmetric Gamma matrix
-  J_skew.mat <- matrix(0, K, K)
-  J_skew.mat[upper.tri(J_skew.mat)] <-  1
-  J_skew.mat[lower.tri(J_skew.mat)] <- -1
-  Gamma  <- gamma0 * J_skew.mat
+  ## Generate intransitive matrix \Gamma
+  m <- floor(K/2)
+  J.mat <- matrix(c(0, 1, -1, 0), nrow = 2, byrow = TRUE)
+  Gamma.mat <- matrix(0, K, K)
+  if (m > 0) {
+    for (r in seq_len(m)) {
+      idx <- (2*r - 1):(2*r)
+      Gamma.mat[idx, idx] <- gamma0[r] * J.mat
+    }
+  }
   
   ## Initiate an N×N matrix storing results (diagonal is NA)
   result <- matrix(NA_integer_, nrow = N, ncol = N)
@@ -280,7 +406,7 @@ Create.Artificial.Data <- function(num.freq = NULL, w0 = NULL, F0 = NULL, gamma0
   for (i in 1:(N-1)) {
     for (j in (i+1):N) {
       M_ij <- as.numeric(crossprod(w0, F0[, i] - F0[, j]) 
-                         + crossprod(F0[, i] / norm(F0[, i],"2"), Gamma %*% (F0[, j] / norm(F0[, j], "2"))))
+                         + crossprod(F0[, i], Gamma.mat %*% F0[, j]))
       p_ij <- 1 / (1 + exp(-M_ij))
       win.freq <- rbinom(1, size = num.freq, prob = p_ij)
       result[i, j] <- win.freq
@@ -291,29 +417,59 @@ Create.Artificial.Data <- function(num.freq = NULL, w0 = NULL, F0 = NULL, gamma0
 }
 
 
+
+
+## Generate artificial data for 7 entities
+N <- 7
+database$K.true7 <- 2
+database$artificial.name7 <- paste("Entity", 1:N)
+database$gamma.true7 <- 2
+database$w.true7 <- c(1, 1)
+database$F.true7 <- matrix(0, database$K.true7, N)
+database$F.true7[,1] = c(-2,0)
+database$F.true7[,2] = c(-1,0)
+database$F.true7[,3] = c(-1/2, sqrt(3))
+database$F.true7[,4] = c(-1/2, -sqrt(3))
+database$F.true7[,5] = c(-1/2, 0)
+database$F.true7[,6] = c(1/2, 0)
+database$F.true7[,7] = c(2, 0)
+database$M.true7 <- generate.M.true(N, K = database$K.true7, 
+                                    F.worths = database$F.true7, 
+                                    w = database$w.true7,
+                                    gamma = database$gamma.true7)
+
+## Name the rows and columns
+database$artificial.7 <- Create.Artificial.Data(num.freq = 100,
+                                                w0 = database$w.true7,
+                                                F0 = database$F.true7,
+                                                gamma0 = database$gamma.true7)
+rownames(database$artificial.7) <- 
+  colnames(database$artificial.7) <- database$artificial.name7
+
+## Convert to binomial format
+database$artificial.7 <- countsToBinomial(database$artificial.7)
+database$artificial.7$n_ij <- database$artificial.7$win1 + database$artificial.7$win2
+database$artificial.7$y_ij <- database$artificial.7$win1
+
+## Plot scores and network
+# plot.scores(database$F.true7, database$w.true7, point.labels = database$artificial.name7, add.arrows = TRUE)
+# g.true.7 <- plot.network(database$artificial.7, weight = "prop", layout = "fr")
+
+
+
+
 # Generate artificial data for 10 entities
 N <- 10
-database$K0.true10 <- 2
+database$K.true10 <- 2
 database$artificial.name10 <- paste("Entity", 1:N)
-database$gamma.true10 <- 1
-database$w.true10 <- c(1, 0.7)
-database$w.true10 <- database$w.true10 / norm(database$w.true10, type = "2")
-database$F.true10 <- generate.F.true(N = N, K = database$K0.true10, decay = 0.6, seed = 73)
-# worths <- crossprod(database$w.true10, database$F.true10)
-
-# Plot database$F.true10
-plot.scores(database$F.true10, database$w.true10, 
-            point.labels = database$artificial.name10, add.arrows = TRUE)
-
-J_skew.mat <- matrix(0, database$K0.true10, database$K0.true10)
-J_skew.mat[upper.tri(J_skew.mat)] <-  1
-J_skew.mat[lower.tri(J_skew.mat)] <- -1
-Gamma  <- database$gamma.true10 * J_skew.mat
-
-# TRUE
-main.true <- crossprod(database$w.true10, database$F.true10[,1]-database$F.true10[,2])
-int.true <- crossprod(database$F.true10[,1], Gamma %*% database$F.true10[,2])
-main.true + int.true
+database$gamma.true10 <- 2.1
+database$w.true10 <- c(1, 1)
+# database$w.true10 <- database$w.true10 / norm(database$w.true10, type = "2")
+database$F.true10 <- generate.F.true(N = N, K = database$K.true10, decay = 0.6, seed = 73)
+database$M.true10 <- generate.M.true(N, K = database$K.true10, 
+                                     F.worths = database$F.true10, 
+                                     w = database$w.true10, 
+                                     gamma = database$gamma.true10)
 
 # rowVars(database$F.true10)
 # rowSds(database$F.true10)
@@ -334,16 +490,24 @@ database$artificial.10 <- countsToBinomial(database$artificial.10)
 database$artificial.10$n_ij <- database$artificial.10$win1 + database$artificial.10$win2
 database$artificial.10$y_ij <- database$artificial.10$win1
 
+# Plot database$F.true10
+# plot.scores(database$F.true10, database$w.true10, point.labels = database$artificial.name10, add.arrows = TRUE)
+# g.true.10 <- plot.network(database$artificial.10, weight = "prop", layout = "fr")
+
 
 
 # Generate artificial data for 15 entities
 N <- 15
-database$K0.true15 <- 3
+database$K.true15 <- 4
 database$artificial.name15 <- paste("Entity", 1:N)
-database$gamma.true15 <- 1
-database$w.true15 <- c(1, 0.9, 0.8)
-database$w.true15 <- database$w.true15 / norm(database$w.true15, type = "2")
-database$F.true15 <- generate.F.true(N = N, K = database$K0.true15, decay = 0.3, seed = 73)
+database$gamma.true15 <- c(1, 0.5)
+database$w.true15 <- rep(1, database$K.true15)
+# database$w.true15 <- database$w.true15 / norm(database$w.true15, type = "2")
+database$F.true15 <- generate.F.true(N = N, K = database$K.true15, decay = 1/3, seed = 73)
+database$M.true15 <- generate.M.true(N, K = database$K.true15, 
+                                     F.worths = database$F.true15, 
+                                     w = database$w.true15, 
+                                     gamma = database$gamma.true15)
 
 # rowVars(database$F.true15)
 # var15 <- rowVars(database$F.true15)
@@ -362,54 +526,6 @@ rownames(database$artificial.15) <-
 database$artificial.15 <- countsToBinomial(database$artificial.15)
 database$artificial.15$n_ij <- database$artificial.15$win1 + database$artificial.15$win2
 database$artificial.15$y_ij <- database$artificial.15$win1
-
-
-
-# Generate artificial data for 30 entities
-N <- 30
-database$K0.true30 <- 4
-database$artificial.name30 <- paste("Entity", 1:N)
-database$w.true30 <- c(2.5, 2, 1.5, 1)
-database$F.true30 <- generate.F.true(N = N, K = database$K0.true30, decay = 0.3, seed = 11)
-
-# var30 <- rowVars(database$F.true30  * database$w.true30)
-# var30 / sum(var30)
-
-# Name the rows and columns
-database$artificial.30 <- Create.Artificial.Data(num.freq = 10, 
-                                                 w0 = database$w.true30,
-                                                 F0 = database$F.true30)
-rownames(database$artificial.30) <- 
-  colnames(database$artificial.30) <- database$artificial.name30
-
-# Convert to binomial format
-database$artificial.30 <- countsToBinomial(database$artificial.30)
-database$artificial.30$n_ij <- database$artificial.30$win1 + database$artificial.30$win2
-database$artificial.30$y_ij <- database$artificial.30$win1
-
-
-
-# Generate artificial data for 100 entities
-N <- 100
-database$K0.true100 <- 5
-database$artificial.name100 <- paste("Entity", 1:N)
-database$w.true100 <- c(3, 2.5, 2, 1.5, 1)
-database$F.true100 <- generate.F.true(N = N, K = database$K0.true100, decay = 0.7, seed = 73)
-
-# var100 <- rowVars(database$F.true100  * database$w.true100)
-# var100 / sum(var100)
-
-# Name the rows and columns
-database$artificial.100 <- Create.Artificial.Data(num.freq = 30, 
-                                                  w0 = database$w.true100,
-                                                  F0 = database$F.true100)
-rownames(database$artificial.100) <- 
-  colnames(database$artificial.100) <- database$artificial.name100
-
-# Convert to binomial format
-database$artificial.100 <- countsToBinomial(database$artificial.100)
-database$artificial.100$n_ij <- database$artificial.100$win1 + database$artificial.100$win2
-database$artificial.100$y_ij <- database$artificial.100$win1
 
 
 ########################  END artificial database  #############################
