@@ -8,34 +8,30 @@ source("functions.R")
 source("database.R")
 
 ## Preparation
-# X <- database$artificial.10
-# entities.name <- database$artificial.name10
-# N <- length(entities.name)  # number of entities
-dimensionality <- 2 # round(5 * log(15), 0)
-num.iter <- 200000
-num.burn <- 30000 # num.iter/5
-alpha <- 3
+X <- database$citations6
+entities.name <- database$name6
+network.true <- database$network.citations6
+# plot.network(X, weight = "prop", layout = "fr", tie_mode = "thin")
+N <- length(entities.name)  # number of entities
+num.iter <- 50000
+num.burn <- num.iter/5
+triplets <- t(combn(1:N, 3))
+num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
 
 ## For real-world data.
-# X <- database$citations.9
-# entities.name <- database$name.9
-# N <- length(entities.name)
+#X <- database$citations.6
+#entities.name <- database$name.6
+#N <- length(entities.name)
 
 ## For artificial data.
 ## Compute means for each entity and each dimension
-N <- 7
-X <- database[[paste0("artificial.", N)]]
+N <- 8
+X <- database[[paste0("artificial", N)]]
 entities.name <- database[[paste0("artificial.name", N)]]
-K0 <- database[[paste0("K.true", N)]]
-out <- matrix(0, nrow = K0, ncol = N)
-for (k in 1:K0) {
-  worths.k <- database[[paste0("w.true", N)]][k] * database[[paste0("F.true", N)]][k, ]
-  worths.centered <- worths.k - mean(worths.k)
-  out[k,] <- round(worths.centered, 4)
-}
-rownames(out) <- paste("Dimension", 1:K0)
-colnames(out) <- entities.name
-# out
+network.true <- database[[paste0("network.true", N)]]
+plot.network(X, weight = "prop", layout = "fr", tie_mode = "thin")
+triplets <- t(combn(1:N, 3))
+num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
 
 ######################  END import & setting  ##################################
 
@@ -73,62 +69,44 @@ if (sorting) {
 ## MSE simulationを追加する
 pairs <- t(combn(N, 2))
 M.BT <- citations.qv.sorted$qvframe$estimate[pairs[,1]] - citations.qv.sorted$qvframe$estimate[pairs[,2]]
-# norm(M.BT - database[[paste0("M.true", N)]][,"M"], "2") / nrow(pairs)
-
 df.BT <- create.bin_df(M.BT, N, names = entities.name)
-plot.network(df.BT, weight = "prop", layout = "fr")
+network.estimates <- plot.network(df.BT, weight = "prop", layout = "fr", tie_mode = "thin")
+isomorphic(network.estimates, network.true)
 
 ######################  END BradleyTerry2 package  #############################
 
 
 ###########################  BEGIN TDBT.Gibbs  #################################
 
-num.chains <- 3
-param.name <- "F.worths"  # Options: (w, gamma, F.worths, V, trans, int, M, K)
-#w.prior <- seq(dimensionality, 1, -1)
-#w.prior <- w.prior / norm(w.prior, type = "2")
-w.prior <- rep(1, dimensionality) # database[[paste0("w.true", N)]]
-gamma.prior <- rep(1, floor(dimensionality/2)) # database[[paste0("gamma.true", N)]]
+## Prior specification
+num.chains <- 1
+param.name <- "Phi"  # Options: (s, Phi, lambda, tau, nu, xi, M)
+s.prior <- rep(0,N)
+Phi.prior <- rep(0,num.triplets)
+lambda.prior <- rep(1/4, num.triplets)
+nu.prior <- rep(1/2, num.triplets)
 mcmc.results <- run.MCMCs(num.chains = num.chains, name = param.name, 
                           MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
-                          X, K = dimensionality, mcmc = num.iter, burn = num.burn, 
-                          thin = 10, eps = 2e-1, rate = 0.6, adaptive = FALSE, 
-                          w.prior = w.prior, S0.prior = diag(dimensionality), 
-                          gamma.prior = gamma.prior, s0.prior = 1,
-                          F.prior = matrix(1, nrow = dimensionality, ncol = N),
-                          V.prior = rep(alpha, dimensionality), alpha = alpha)
+                          X, mcmc = num.iter, burn = num.burn, thin = 1,
+                          s.prior = s.prior, sigma.prior = 1, Phi.prior = Phi.prior, 
+                          lambda.prior = lambda.prior, nu.prior = nu.prior, 
+                          tau.prior = 1/2, xi.prior = 1/2)
 
 ## Extract MCMC sample for specified parameter (name)
-specific.mcmc <- mcmc.extract(mcmc.results$all.mcmc, param.name, rhat = TRUE, ess = TRUE)
+specific.mcmc <- mcmc.extract(mcmc.results$all.mcmc, param.name, N, rhat = FALSE, ess = FALSE)
 
 ## Represent information for the posterior of specified parameter.
-plot.MCMCs(num.chains, specific.mcmc, param.name)       # plot MCMC sample path
-plot.posteriors(num.chains, specific.mcmc, param.name)  # plot MCMC histgram
-plot.ACFs(num.chains, specific.mcmc, param.name)        # plot autocorrelation function (ACF)
-compute.CIs(num.chains, specific.mcmc, param.name, level = 0.95, decimal = 3, hpd = TRUE) # compute credible intervals
-specific.mean <- stats.posteriors(num.chains, specific.mcmc, param.name, decimal = 3)  # compute the mean and median
+plot.MCMCs(num.chains, specific.mcmc, param.name, N)       # plot MCMC sample path
+plot.posteriors(num.chains, specific.mcmc, param.name, N)  # plot MCMC histgram
+plot.ACFs(num.chains, specific.mcmc, param.name, N)        # plot autocorrelation function (ACF)
+compute.CIs(num.chains, specific.mcmc, param.name, N, level = 0.95, decimal = 3, hpd = TRUE) # compute credible intervals
+specific.mean <- stats.posteriors(num.chains, specific.mcmc, param.name, N, decimal = 3)  # compute the mean and median
 
-## Plot scores and network
-M.estimates <- stats.posteriors(num.chains, param.name = "M", decimal = 3, 
-                                mcmc.extract(mcmc.results$all.mcmc, "M"))
-df.estimated <- create.bin_df(M.estimates, N, names = entities.name)
-g.estimates <- plot.network(df.estimated, weight = "prop", layout = "fr")
-isomorphic(g.estimates, g.true.7)
-
-w.estimates <- w.prior
-F.estimates <- stats.posteriors(num.chains, param.name = "F.worths", decimal = 3,
-                                mcmc.extract(mcmc.results$all.mcmc, "F.worths"))
-plot.scores(F.estimates, w.estimates, point.labels = entities.name, add.arrows = TRUE)
-
-## Compare each MCMC chain
-plot.contributions(mcmc.results$all.mcmc, plot = TRUE, weight = FALSE)
-plot.worths(num.chains, mcmc.results$all.mcmc, names = entities.name,
-            partition = FALSE, order = NULL, level = 1, weight = TRUE)
-stats.worths(num.chains, mcmc.results$all.mcmc, names = entities.name, 
-             partition = FALSE, order = NULL, decimal = 2)
-
-# Label-switching diagnosis
-LabelSwitching.diag(num.chains, mcmc.extract(mcmc.results$all.mcmc, name = "worths"))
-# LabelSwitching.diag(num.chains, mcmc.extract(mcmc.results$all.mcmc, name = "w"))
+## Plot network and check whether isomorphic or not
+M.estimates <- stats.posteriors(num.chains, mcmc.extract(mcmc.results$all.mcmc, "M", N),
+                                name = "M", num.entities =  N, decimal = 3)
+df.estimated <- create.bin_df(M.estimates, names = NULL, N)
+network.estimates <- plot.network(df.estimated, weight = "prop", layout = "fr", tie_mode = "thin")
+isomorphic(network.estimates, network.true)
 
 ############=################  END TDBT.Gibbs  ##################################
