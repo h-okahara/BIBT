@@ -4,13 +4,15 @@
 ########################  BEGIN import libraries  ##############################
 
 library(BradleyTerry2)
+# library(PLMIX)
+# library(PlackettLuce)
 library(coda)
 library(posterior)
 library(bayesplot)
 library(BayesLogit)
 
 library(MASS)
-library(matrixStats)
+library(matrixStats) # for test
 library(truncdist)
 library(TruncatedNormal)
 
