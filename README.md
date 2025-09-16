@@ -1,10 +1,12 @@
-# TDBT: Trans‑Dimensional Bradley‑Terry
+# CBT: Cyclic Bradley-Terry
 
-## Overview
-This repository provides an implementation of the Trans‑Dimensional Bradley‑Terry (TDBT) model for ranking estimation. It extends the classic Bradley‑Terry framework to allow multi‑dimensional latent “worth” scores and automatic selection of the appropriate dimensionality. Efficient Gibbs sampling is achieved via Polya‑Gamma data augmentation, enabling accurate ranking from pairwise comparison data.
+## OVERVIEW
+This repository provides an implementation of the **Cyclic Bradley-Terry (CBT)** model for ranking estimation.  
+The CBT model extends the classic Bradley-Terry framework by introducing **triangular parameters** that explicitly capture *intransitive* patterns (e.g., rock–paper–scissors structures) in pairwise comparison data.  
+Efficient Bayesian inference is carried out using **Pólya-Gamma data augmentation**, together with *Horseshoe shrinkage prior* to regularize the cyclic effects.
 
-## Key Features
-- **Multi‑Dimensional Worth**: Generalizes the univariate Bradley‑Terry model to estimate latent worth in an arbitrary number of dimensions.  
-- **Automatic Dimension Selection**: Employs a multiplicative gamma process to sparsify extra dimensions, letting the data determine the number of relevant latent factors.  
-- **Polya‑Gamma Sampling**: Leverages data augmentation for the binomial likelihood to implement a concise and fast Gibbs sampler.  
-- **Visualization & Diagnostics**: Includes functions for trace plots, violin plots, ESS/R̂ diagnostics, and credible‑interval computation.
+## CONTENTS
+1. `libraries.R`    : Loads the required R packages for the project.
+2. `database.R`     : Provides an example dataset used in the manuscript.
+3. `functions.R`    : Contains core utility functions (e.g., Gibbs sampler, data generation, visualization).
+4. `main.R`         : Main script to fit the CBT model to data and reproduce key results.  
