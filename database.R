@@ -202,11 +202,14 @@ N <- 8
 database$artificial.name8 <- paste("Entity", 1:N)
 num.pairs <- ncol(combn(N, 2))
 database$freq.true8 <- rep(30, num.pairs)
-database$s.true8 <- c(1,2,3,4,5,6,7,8) - mean(c(1,2,3,4,5,6,7,8))
+database$s.true8 <- c(1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5) 
+database$s.true8 <- database$s.true8 - mean(database$s.true8)
 database$Phi.true8 <- rep(0, ncol(combn(N, 3)))
 database$Phi.true8[1]  <- 1.5  # Phi_123
-database$Phi.true8[2]  <- 0.5  # Phi_124
-database$Phi.true8[10] <- 1.4    # Phi_137
+database$Phi.true8[2]  <- 1.2  # Phi_124
+database$Phi.true8[10] <- 1.2  # Phi_137
+#database$Phi.true8[15] <- 1    # Phi_148
+#database$Phi.true8[20] <- 0.8  # Phi_168
 database$M.true8 <- compute.M.true(num.entities = N, 
                                    s = database$s.true8, Phi = database$Phi.true8)
 
