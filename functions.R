@@ -254,7 +254,8 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
 ## OUTPUT:
 # A list of MCMC draws from multiple chains.
 
-run.MCMCs <- function(num.chains = 1, name, MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
+run.MCMCs <- function(num.chains = 1, name, num.entities = NULL, 
+                      MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
                       X, mcmc = 10000, burn = 2000, thin = 1,
                       s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL, 
                       lambda.prior = NULL, nu.prior = NULL, 
@@ -271,11 +272,11 @@ run.MCMCs <- function(num.chains = 1, name, MCMC.plot = FALSE, rhat = FALSE, ess
   }, mc.cores = min(num.chains, parallel::detectCores()-1))
   
   ## Extract samples of specific parameter (name) from chains
-  mcmc.chains <- mcmc.extract(chains, name, rhat = rhat, ess = ess)
+  mcmc.chains <- mcmc.extract(chains, name, num.entities, rhat = rhat, ess = ess)
   
   ## Plot MCMC sample paths
   if (MCMC.plot) {
-    plot.MCMCs(num.chains, mcmc.chains, name)
+    plot.MCMCs(num.chains, mcmc.chains, name, num.entities)
   }
   
   print(paste("Total runtime: ", round(difftime(Sys.time(), start.time, units = "sec"), 3), "seconds"))
