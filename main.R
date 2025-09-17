@@ -7,31 +7,25 @@ source("libraries.R")
 source("functions.R")
 source("database.R")
 
-## Preparation
-X <- database$citations6
-entities.name <- database$name6
-network.true <- database$network.citations6
-# plot.network(X, weight = "prop", layout = "fr", tie_mode = "thin")
-N <- length(entities.name)  # number of entities
-num.iter <- 50000
-num.burn <- num.iter/5
-triplets <- t(combn(1:N, 3))
-num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
-
 ## For real-world data.
-#X <- database$citations.6
-#entities.name <- database$name.6
-#N <- length(entities.name)
+# X <- database$citations6
+# entities.name <- database$name6
+# network.true <- database$network.citations6
+# plot.network(X, weight = "prop", layout = "fr", tie_mode = "thin")
+# N <- length(entities.name)  # number of entities
 
 ## For artificial data.
-## Compute means for each entity and each dimension
 N <- 8
 X <- database[[paste0("artificial", N)]]
 entities.name <- database[[paste0("artificial.name", N)]]
 network.true <- database[[paste0("network.true", N)]]
 plot.network(X, weight = "prop", layout = "fr", tie_mode = "thin")
+
+## Preparation
 triplets <- t(combn(1:N, 3))
 num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
+num.iter <- 50000
+num.burn <- num.iter/5
 
 ######################  END import & setting  ##################################
 
@@ -83,9 +77,9 @@ num.chains <- 1
 param.name <- "Phi"  # Options: (s, Phi, lambda, tau, nu, xi, M)
 s.prior <- rep(0,N)
 Phi.prior <- rep(0,num.triplets)
-lambda.prior <- rep(1/4, num.triplets)
-nu.prior <- rep(1/2, num.triplets)
-mcmc.results <- run.MCMCs(num.chains = num.chains, name = param.name, 
+lambda.prior <- rep(1, num.triplets)
+nu.prior <- rep(1/4, num.triplets)
+mcmc.results <- run.MCMCs(num.chains = num.chains, name = param.name, num.entities = N,
                           MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
                           X, mcmc = num.iter, burn = num.burn, thin = 1,
                           s.prior = s.prior, sigma.prior = 1, Phi.prior = Phi.prior, 
