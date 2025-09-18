@@ -1031,11 +1031,11 @@ plot.network <- function(bin_df, edge.label = FALSE, draw.flag = TRUE,
   scc <- components(g, mode = "strong")
   memb <- scc$membership
   csize <- scc$csize
-  eH <- as.integer(head_of(g, E(g)))  # 辺の終点
-  eT <- as.integer(tail_of(g, E(g)))  # 辺の始点
+  eH <- as.integer(head_of(g, E(g)))
+  eT <- as.integer(tail_of(g, E(g)))
   same_scc <- memb[eH] == memb[eT]
   scc_gt1  <- csize[memb[eH]] > 1
-  loop_e   <- which_loop(g)           # 自己ループは常にサイクル
+  loop_e   <- which_loop(g)
   on_cycle <- (same_scc & scc_gt1) | loop_e
   E(g)$color <- rgb(0.2, 0.5, 0.9, 1)
   E(g)[on_cycle]$color <- rgb(1, 0.1, 0.3, 1)
