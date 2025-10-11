@@ -8,21 +8,22 @@
 # mcmc:         Number of iterations;
 # burn:         Burn-in period;
 # thin:         A thinning interval;
+# varepsilon    A scalar hyperparameter representing the variance of each constraint;
 # s.prior:      A N×1 vector representing the score of each subject;
 # sigma.prior:  A scalar representing variance of score s_t for t=1,...,N;
-# Phi.prior:    A m×1 vector representing the triangular parameters;
-# lambda.prior: A m×1 vector representing the local-shrinkage parameters;
-# nu.prior:     A m×1 vector representing the scalar of lambda.prior;
+# Phi.prior:    A num.triplets×1 vector representing the triangular parameters;
+# lambda.prior: A num.free×1 vector representing the local-shrinkage parameters;
 # tau.prior:    A scalar representing the global-shrinkage parameters;
+# nu.prior:     A num.free×1 vector representing the scalar of lambda.prior;
 # xi.prior:     A scalar representing the scalar of tau.prior.
 
 ## OUTPUT:
 # A list of MCMC samples for the parameters: omega, s, Phi, lambda, tau, nu, xi.
 
-CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, 
-                      s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL, 
-                      lambda.prior = NULL, nu.prior = NULL,
-                      tau.prior = NULL, xi.prior = NULL) {
+CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, varepsilon = NULL,
+                      s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL,
+                      lambda.prior = NULL, tau.prior = NULL, 
+                      nu.prior = NULL, xi.prior = NULL) {
   ## Preparation
   entity.name <- unique(c(X[ ,1], X[ ,2]))
   N <- length(entity.name)  # number of entities
@@ -31,168 +32,121 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
   if(num.pairs!=nrow(X)){stop("Number of pairs is not equal to the length of X")}
   triplets <- t(combn(1:N, 3))
   num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
-  target_triplet.idx <- which(apply(triplets, 1, function(row) 1 %in% row)) # For identification
-  num.target_triplets <- length(target_triplet.idx)
+  num.kernel <- ncol(combn(N-1, 3))
+  num.free <- num.triplets-num.kernel
   
   ## Initial values
   s      <- if(is.null(s.prior))  rep(0, N) else s.prior
   sigma  <- if(is.null(sigma.prior))  1 else sigma.prior
   Phi    <- if(is.null(Phi.prior))  rep(0, num.triplets)  else Phi.prior
-  lambda <- if(is.null(lambda.prior)) rep(1, num.triplets)  else lambda.prior
-  nu     <- if(is.null(nu.prior)) rep(1, num.triplets)  else nu.prior
-  tau    <- if(is.null(tau.prior))  1 else tau.prior
+  lambda <- if(is.null(lambda.prior)) rep(0.01, num.triplets-num.kernel) else lambda.prior
+  tau    <- if(is.null(tau.prior))  0.01  else tau.prior
+  nu     <- if(is.null(nu.prior)) rep(1, num.triplets-num.kernel) else nu.prior
   xi     <- if(is.null(xi.prior)) 1 else xi.prior
+  varepsilon <- if(is.null(varepsilon)) 1e-6 else varepsilon
   
-  omega  <- rep(0, num.pairs)
-  kappa  <- X$y_ij - X$n_ij/2
+  omega <- rep(0, num.pairs)
+  kappa <- X$y_ij - X$n_ij/2
+  W.vec <- c(tau^2 * lambda^2, rep(varepsilon^2, num.kernel))
   
-  ## Indexing maps of pairs (i,j) and triplets (i,j,k)
+  ## Indexing maps of pairs (i,j)
   pair.map <- matrix(0, N, N)
   for(idx in 1:num.pairs) {
     pair.map[pairs[idx,1], pairs[idx,2]] <- idx
   }
   
-  triplet.map <- array(0, dim=c(N,N,N))
-  for(idx in 1:num.triplets) {
-    triplet.map[triplets[idx,1], triplets[idx,2], triplets[idx,3]] <- idx
-  }
+  ## Build G = grad (num.pairs x N)
+  G_i <- rep(1:num.pairs, 2)        # row indices
+  G_j <- c(pairs[, 1], pairs[, 2])  # column indices
+  G_x <- c(rep(1, num.pairs), rep(-1, num.pairs))
+  G <- sparseMatrix(i = G_i, j = G_j, x = G_x, dims = c(num.pairs, N))
   
-  ## Helper function: draw out the scalar 'input.vec_ijk' from the vector 'input.vec'
-  draw.triplet <- function(i,j,k, input.vec) {
-    if (i == j || j == k || i == k) return(0)
-    idx <- c(i,j,k)
-    asc.idx <- sort(idx)
-    input.idx <- triplet.map[asc.idx[1], asc.idx[2], asc.idx[3]]
-    if (input.idx == 0) return(0)
-
-    sign <- sign((idx[2]-idx[1]) * (idx[3]-idx[1]) * (idx[3]-idx[2]))
-    return(sign*input.vec[input.idx])
-  }
+  ## Build C.ast = curl* (num.pairs x num.triplets)
+  pair.map.vec <- as.vector(pair.map)
+  e_ij <- pair.map.vec[triplets[, 1] + (triplets[, 2] - 1) * N]
+  e_jk <- pair.map.vec[triplets[, 2] + (triplets[, 3] - 1) * N]
+  e_ik <- pair.map.vec[triplets[, 1] + (triplets[, 3] - 1) * N]
+  C_i <- c(e_ij, e_jk, e_ik)  # row indices
+  C_j <- c(1:num.triplets, 1:num.triplets, 1:num.triplets)  # column indices
+  C_x <- c(rep(1, num.triplets), rep(1, num.triplets), rep(-1, num.triplets))
+  C.ast <- sparseMatrix(i = C_i, j = C_j, x = C_x, dims = c(num.pairs, num.triplets))
   
-  ## Calculate kappa^(t) = sum_{j:t<j} kappa_tj - sum_{j:j<t} kappa_jt
-  kappa_t <- numeric(N)
-  for (t in 1:N) {
-    for (j in (1:N)[-t]) {
-      if (t < j) {
-        p <- pair.map[t, j]
-        kappa_t[t] <- kappa_t[t] + kappa[p]
-      } else {
-        p <- pair.map[j, t]
-        kappa_t[t] <- kappa_t[t] - kappa[p]
-      }
-    }
-  }
+  ## Build A (basis of ker(C.ast)), H (orthogonal complement)
+  # Compute SVD of C.ast: C.ast = U D V^T
+  sv <- svd(C.ast, nu = 0, nv = num.triplets)
+  C.ast.rank <- sum(sv$d > 1e-10) # rank of C.ast
+  if(num.free!=C.ast.rank){stop("Number of free basises is not equal to the rank of C.ast")}
   
-  ## Match-up function: M_ij = (s_i - s_j) + sum_{l!=i,j} Phi_ijl
-  grad.flow <- s[pairs[,1]] - s[pairs[,2]]
-  curl.flow <- numeric(num.pairs)
-  for (p in 1:num.pairs) {
-    i <- pairs[p,1]
-    j <- pairs[p,2]
-    for (k in (1:N)[-c(i, j)]) {
-      curl.flow[p] <- curl.flow[p] + draw.triplet(i,j,k, Phi)
-    }
-  }
+  # A: num.triplets x k basis of ker(C.ast),
+  A <- if (C.ast.rank < num.triplets) sv$v[, (C.ast.rank+1):num.triplets, drop = FALSE] else matrix(0, num.triplets, 0)
+  # H: num.triplets x (num.triplets-k) orthonormal complement
+  H <- if (C.ast.rank > 0) sv$v[, 1:C.ast.rank, drop = FALSE] else matrix(0, num.triplets, 0)
+  P <- t(cbind(H, A)) # P = (H,A)^T
+  if(num.kernel!=ncol(A)){stop("Number of kernel basises is not equal to the number of columns of A")}
+  if(num.free!=ncol(H)){stop("Number of free basises is not equal to the number of columns of H")}
+  
+  ## Match-up function: M = grad s + curl* \Phi = Gs + C.ast \Phi
+  grad.flow <- as.vector(G %*% s)
+  curl.flow <- as.vector(C.ast %*% Phi)
   M.vec <- grad.flow + curl.flow
+  
+  ## Define matrices for posterior samples
+  mcmc.row <- ((mcmc-burn) - (mcmc-burn) %% thin) / thin
+  s.pos    <- matrix(0, nrow = mcmc.row, ncol = N)
+  Phi.pos  <- matrix(0, nrow = mcmc.row, ncol = num.triplets)
+  lambda.pos  <- matrix(0, nrow = mcmc.row, ncol = num.free)
+  tau.pos  <- matrix(0, nrow = mcmc.row, ncol = 1)
+  nu.pos  <- matrix(0, nrow = mcmc.row, ncol = num.free)
+  xi.pos  <- matrix(0, nrow = mcmc.row, ncol = 1)
+  M.pos    <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
   
   sample.idx <- 0
   #=======================   BEGIN MCMC sampling   =============================
   for (iter in 1:mcmc) {
     # -----------------------  BEGIN Updating  ---------------------------------
-    ## Updating omega
-    omega <- rpg(n = num.pairs, h = X$n_ij, z = M.vec)  # sample omega[p] from Pólya-Gamma distribution
+    ## Updating omega: sample omega from Pólya-Gamma distribution
+    omega <- rpg(n = num.pairs, h = X$n_ij, z = M.vec)
     
-    ## Updating s_t for t=1,...,N
-    for (t in 1:N) {
-      omega_t <- 0
-      eta_t <- 0
-      f_t <- 0
-      for (j in (1:N)[-t]) {
-        if (t<j) {
-          idx <- pair.map[t,j]
-          
-          if (idx > 0) {
-            omega_t <- omega_t + omega[idx]
-            eta_t <- eta_t + omega[idx] * s[j]
-            f_t <- f_t + omega[idx] * curl.flow[idx]
-          }
-        } else {
-          idx <- pair.map[j,t]
-          
-          if (idx > 0) {
-            omega_t <- omega_t + omega[idx]
-            eta_t <- eta_t + omega[idx] * s[j]
-            f_t <- f_t - omega[idx] * curl.flow[idx]
-          }
-        }
-      }
-      
-      a_s <- 1 / (1/sigma^2 + omega_t)
-      b_s <- kappa_t[t] + eta_t - f_t
-      s[t] <- rnorm(1, mean = a_s * b_s, sd = sqrt(a_s))
-    }
+    ## Updating s: N×1 score vector
+    A_s <- solve(Diagonal(N)/sigma^2 + crossprod(G, omega * G))
+    B_s <- crossprod(G, kappa - omega * as.vector(C.ast %*% Phi))
+    s <- mvrnorm(n=1, mu = A_s %*% B_s, Sigma = A_s)
     s <- s - mean(s) # Identification
     
-    ## Updating Phi_ijk for (i,j,k) \in T
-    for (idx in target_triplet.idx) {
-      i <- triplets[idx, 1]
-      j <- triplets[idx, 2]
-      k <- triplets[idx, 3]
-      
-      p_ij <- pair.map[i,j]
-      p_ik <- pair.map[i,k]
-      p_jk <- pair.map[j,k]
-      
-      omega_ijk <- omega[p_ij] + omega[p_ik] + omega[p_jk]
-      kappa_ijk <- kappa[p_ij] - kappa[p_ik] + kappa[p_jk]
-      eta_ijk <- (s[i]-s[j])*omega[p_ij] + (s[j]-s[k])*omega[p_jk] + (s[k]-s[i])*omega[p_ik]
-
-      sum_ijl <- 0; sum_ikl <- 0; sum_jkl <- 0
-      for (l in (1:N)[-c(i,j,k)]) {
-        sum_ijl <- sum_ijl + draw.triplet(i,j,l, Phi)
-        sum_ikl <- sum_ikl + draw.triplet(i,k,l, Phi)
-        sum_jkl <- sum_jkl + draw.triplet(j,k,l, Phi)
-      }
-      f_ijk <- omega[p_ij]*sum_ijl - omega[p_ik]*sum_ikl + omega[p_jk]*sum_jkl
-      
-      # Generate Phi_ijk ~ N(a_Phi b_Phi, a_Phi) for (i,j,k) \in T
-      a_Phi <- 1 / (omega_ijk + 1/(tau^2 * lambda[idx]^2))
-      b_Phi <- kappa_ijk - eta_ijk - f_ijk
-      Phi[idx] <- rnorm(1, mean = a_Phi * b_Phi, sd = sqrt(a_Phi))
-    }
+    ## Updating Phi: num.triplets×1 trianguler vector
+    Prec_Phi <- crossprod(P, Diagonal(x=1/W.vec) %*% P) + crossprod(C.ast, Diagonal(x=omega) %*% C.ast)
+    Prec_Phi <- (Prec_Phi + t(Prec_Phi))/2
+    U_t <- chol(Prec_Phi) # Upper triangular matrix
+    B_Phi <- crossprod(C.ast, kappa - omega * as.vector(G %*% s)) # Prec_Phi μ = B_Phi
+    tmp <- forwardsolve(t(U_t), B_Phi)  # Solve U_t^T y = B_Phi
+    mu_Phi <- backsolve(U_t, tmp)       # Solve y = U_t μ
+    v <- rnorm(num.triplets)            # v ~ N(0,I)
+    z <- backsolve(U_t, v)              # Solve U_t z = v, then z ~ N(0, (Prec_Phi)^{-1})
+    Phi <- mu_Phi + z
     
-    ## Updating lambda_ijk for (i,j,k) \in T
-    b_lambda <- 1/nu + Phi^2/(2*tau^2)
-    for (idx in target_triplet.idx) {
-      lambda[idx] <- sqrt(1 / rgamma(1, shape=1, rate = b_lambda[idx]))
-    }
+    ## Updating lambda: num.free×1 vector
+    theta <- as.vector(crossprod(H, Phi))
+    b_lambda <- 1/nu + theta^2/(2*tau^2)
+    lambda <- sqrt(1/rgamma(num.free, shape = 1, rate = b_lambda))
     
-    ## Updating nu_ijk for (i,j,k) \in T
+    ## Updating tau:
+    a_tau <- (num.free+1)/2
+    S <- sum(theta^2/lambda^2)
+    b_tau <- S/2 + 1/xi
+    tau <- sqrt(1/rgamma(1, shape = a_tau, rate = b_tau))
+    
+    ## Updating nu: num.free×1 vector
     b_nu <- 1 + 1/lambda^2
-    for (idx in target_triplet.idx) {
-      nu[idx] <- 1 / rgamma(1, shape=1, rate = b_nu[idx])
-    }
+    nu <- 1/rgamma(num.free, shape = 1, rate = b_nu)
     
-    ## Updating tau
-    S <- sum(Phi[target_triplet.idx]^2 / lambda[target_triplet.idx]^2)
-    a_tau <- (num.target_triplets + 1) / 2
-    b_tau <- 1/xi + S/2
-    tau <- sqrt(1 / rgamma(1, shape = a_tau, rate = b_tau))
-    
-    ## Updating xi
-    xi <- 1 / rgamma(1, shape=1, rate = 1 + 1/tau^2)
+    ## Updating xi:
+    b_xi <- 1 + 1/tau^2
+    xi <- 1/rgamma(1, shape = 1, rate = b_xi)
     
     ## Updating other parameters
-    ## Match-up function: M_ij = (s_i - s_j) + sum_{l!=i,j} Phi_ijl
-    grad.flow <- s[pairs[,1]] - s[pairs[,2]]
-    curl.flow <- numeric(num.pairs)
-    for (p in 1:num.pairs) {
-      i <- pairs[p,1]
-      j <- pairs[p,2]
-      for (k in (1:N)[-c(i, j)]) {
-        curl.flow[p] <- curl.flow[p] + draw.triplet(i,j,k, Phi)
-      }
-    }
+    W.vec <- c(tau^2 * lambda^2, rep(varepsilon^2, num.kernel))
+    grad.flow <- as.vector(G %*% s)
+    curl.flow <- as.vector(C.ast %*% Phi)
     M.vec <- grad.flow + curl.flow
     
     # ------------------------  END Updating  ----------------------------------
@@ -200,29 +154,19 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
       sample.idx <- sample.idx + 1
       
       ## Store posterior samples
-      s.pos[sample.idx, ]      <- s #- mean(s) # Identification
-      Phi.pos[sample.idx, ]    <- Phi
-      lambda.pos[sample.idx, ] <- lambda
-      nu.pos[sample.idx, ]     <- nu
-      tau.pos[sample.idx, ]    <- tau
-      xi.pos[sample.idx, ]     <- xi
-      M.pos[sample.idx, ]      <- M.vec
-    } else if (iter == burn) {
-      ## Define matrices for posterior samples
-      mcmc.row   <- ((mcmc-burn) - (mcmc-burn) %% thin) / thin
-      s.pos      <- matrix(0, nrow = mcmc.row, ncol = N)
-      Phi.pos    <- matrix(0, nrow = mcmc.row, ncol = num.triplets)
-      lambda.pos <- matrix(0, nrow = mcmc.row, ncol = num.triplets)
-      nu.pos     <- matrix(0, nrow = mcmc.row, ncol = num.triplets)
-      tau.pos    <- matrix(0, nrow = mcmc.row, ncol = 1)
-      xi.pos     <- matrix(0, nrow = mcmc.row, ncol = 1)
-      M.pos      <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
+      s.pos[sample.idx, ]      <- as.vector(s)
+      Phi.pos[sample.idx, ]    <- as.vector(Phi)
+      lambda.pos[sample.idx, ] <- as.vector(lambda)
+      tau.pos[sample.idx, ]    <- as.vector(tau)
+      nu.pos[sample.idx, ]     <- as.vector(nu)
+      xi.pos[sample.idx, ]     <- as.vector(xi)
+      M.pos[sample.idx, ]      <- as.vector(M.vec)
     }
   }
   #=======================   END MCMC sampling   ===============================
   
-  result <- list(s=s.pos, Phi=Phi.pos, lambda=lambda.pos, nu=nu.pos, 
-                 tau = tau.pos, xi = xi.pos, M = M.pos)
+  result <- list(s = s.pos, Phi = Phi.pos, lambda = lambda.pos, tau = tau.pos, 
+                 nu = nu.pos, xi = xi.pos, M = M.pos)
   return(result)
 }
 
@@ -243,12 +187,13 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
 # mcmc:         Number of iterations;
 # burn:         Burn-in period;
 # thin:         A thinning interval;
+# varepsilon    A scalar hyperparameter representing the variance of each constraint;
 # s.prior:      A N×1 vector representing the score of each subject;
 # sigma.prior:  A scalar representing variance of score s_t for t=1,...,N;
-# Phi.prior:    A m×1 vector representing the triangular parameters;
-# lambda.prior: A m×1 vector representing the local-shrinkage parameters;
-# nu.prior:     A m×1 vector representing the scalar of lambda.prior;
+# Phi.prior:    A num.triplets×1 vector representing the triangular parameters;
+# lambda.prior: A num.free×1 vector representing the local-shrinkage parameters;
 # tau.prior:    A scalar representing the global-shrinkage parameters;
+# nu.prior:     A num.free×1 vector representing the scalar of lambda.prior;
 # xi.prior:     A scalar representing the scalar of tau.prior.
 
 ## OUTPUT:
@@ -256,19 +201,19 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
 
 run.MCMCs <- function(num.chains = 1, name, num.entities = NULL, 
                       MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
-                      X, mcmc = 10000, burn = 2000, thin = 1,
+                      X, mcmc = 10000, burn = 2000, thin = 1, varepsilon = 1e-4,
                       s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL, 
-                      lambda.prior = NULL, nu.prior = NULL, 
-                      tau.prior = NULL, xi.prior = NULL) {
+                      tau.prior = NULL, lambda.prior = NULL, 
+                      nu.prior = NULL, xi.prior = NULL) {
   start.time <- Sys.time()
   
   ## Run multiple MCMC chains
   chains <- parallel::mclapply(1:num.chains, function(chain.id) {
     set.seed(73 + chain.id)
-    CBT.Gibbs(X, mcmc = mcmc, burn = burn, thin = thin,
+    CBT.Gibbs(X, mcmc = mcmc, burn = burn, thin = thin, varepsilon = varepsilon,
               s.prior = s.prior, sigma.prior = sigma.prior, Phi.prior = Phi.prior, 
-              lambda.prior = lambda.prior, nu.prior = nu.prior,
-              tau.prior = tau.prior, xi.prior = xi.prior)
+              tau.prior = tau.prior, lambda.prior = lambda.prior, 
+              nu.prior = nu.prior, xi.prior = xi.prior)
   }, mc.cores = min(num.chains, parallel::detectCores()-1))
   
   ## Extract samples of specific parameter (name) from chains
@@ -300,20 +245,39 @@ run.MCMCs <- function(num.chains = 1, name, num.entities = NULL,
 # Overlayed trace plots (sample paths) for each parameter.
 
 plot.MCMCs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
-  if (name == "Phi" || name == "lambda" || name == "nu") {
+  if (name == "Phi") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.triplets <- dim(mcmc.chains[[1]])[2]
-    
     triplets <- t(combn(1:num.entities, 3))
     if(num.triplets!=nrow(triplets)){stop("Number of triplets given N is not equal to the length of Phi")}
-    target_triplet.idx <- which(apply(triplets, 1, function(row) 1 %in% row))
-    num.target_triplets <- length(target_triplet.idx)
-    
+
     ## Set up the plotting area
-    par(mfrow = c(1, num.target_triplets), mar = c(1, 1, 1, 1), oma = c(1, 1, 2, 1))
+    num.row <- ifelse(num.triplets%%8==0, num.triplets %/% 8, num.triplets %/% 8 +1)
+    par(mfrow = c(num.row, 8), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
     
     ## Loop over each triplet to plot MCMC paths
-    for (idx in target_triplet.idx) {
+    for (idx in 1:num.triplets) {
+      plot(1:mcmc, mcmc.chains[[1]][, idx], type = "l", col = 1,
+           xlab = "Iteration", ylab = "", main = paste0(name, "_", triplets[idx,1], triplets[idx,2], triplets[idx,3]))
+      
+      # Overlay traces for remaining chains
+      if (num.chains > 1) {
+        for (i in 2:num.chains) {
+          lines(1:mcmc, mcmc.chains[[i]][, idx], col = i)
+        }
+      }
+    }
+    mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
+  } else if (name == "lambda" || name == "nu") {
+    mcmc <- dim(mcmc.chains[[1]])[1]
+    num.free <- dim(mcmc.chains[[1]])[2]
+    
+    ## Set up the plotting area
+    num.row <- ifelse(num.free%%8==0, num.free %/% 8, num.free %/% 8 +1)
+    par(mfrow = c(num.row, 8), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
+    
+    ## Loop over each triplet to plot MCMC paths
+    for (idx in 1:num.free) {
       plot(1:mcmc, mcmc.chains[[1]][, idx], type = "l", col = 1,
            xlab = "Iteration", ylab = "", main = paste0(name, "_", triplets[idx,1], triplets[idx,2], triplets[idx,3]))
       
@@ -403,20 +367,41 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
 # Histograms with density curves for each parameter, overlaying traces from all chains.
 
 plot.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, bins = 30) {
-  if (name == "Phi" || name == "lambda" || name == "nu") {
+  if (name == "Phi") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.triplets <- dim(mcmc.chains[[1]])[2]
-    
     triplets <- t(combn(1:num.entities, 3))
     if(num.triplets!=nrow(triplets)){stop("Number of triplets given N is not equal to the length of Phi")}
-    target_triplet.idx <- which(apply(triplets, 1, function(row) 1 %in% row))
-    num.target_triplets <- length(target_triplet.idx)
     
     ## Set up the plotting area
-    par(mfrow = c(1, num.target_triplets), mar = c(1, 1, 1, 1), oma = c(1, 1, 2, 1))
+    num.row <- ifelse(num.triplets%%8==0, num.triplets %/% 8, num.triplets %/% 8 +1)
+    par(mfrow = c(num.row, 8), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
     
     ## Loop over each triplet to plot histograms
-    for (idx in target_triplet.idx) {
+    for (idx in 1:num.triplets) {
+      hist(mcmc.chains[[1]][, idx], breaks = bins, col = "skyblue", border = "white", probability = TRUE,
+           xlab = name, main = paste0(name, "_", triplets[idx,1], triplets[idx,2], triplets[idx,3]))
+      
+      # Overlay density curves from all chains
+      if (num.chains > 1) {
+        for (i in 1:num.chains) {
+          lines(density(mcmc.chains[[i]][, idx]), col = i, lwd = 2)
+        }
+      } else {
+        lines(density(mcmc.chains[[1]][, idx]), col = 1, lwd = 2)
+      }
+    }
+    mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
+  } else if (name == "lambda" || name == "nu") {
+    mcmc <- dim(mcmc.chains[[1]])[1]
+    num.free <- dim(mcmc.chains[[1]])[2]
+    
+    ## Set up the plotting area
+    num.row <- ifelse(num.free%%8==0, num.free %/% 8, num.free %/% 8 +1)
+    par(mfrow = c(num.row, 8), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
+    
+    ## Loop over each triplet to plot histograms
+    for (idx in 1:num.free) {
       hist(mcmc.chains[[1]][, idx], breaks = bins, col = "skyblue", border = "white", probability = TRUE,
            xlab = name, main = paste0(name, "_", triplets[idx,1], triplets[idx,2], triplets[idx,3]))
       
@@ -508,32 +493,95 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, bin
 # mcmc.chains:  A list of specific MCMC samples from each chain;
 # name:         A string representing the name of parameters;
 # num.entities: Number of entities (e.g., items and players);
+# rhat:         Logical flag: if TRUE, compute and print credible intervals (lower and uppper bounds);
+# level:        The credible interval level (e.g., 0.95);
+# hpd:          Logical flag: if TRUE, return the Highest Posterior Density (HPD) interval;
 # decimal:      Number of decimal places.
 
 ## OUTPUT:
 # For each chain, prints a data frame of posterior statistics (mean and median) for each parameter.
 
-stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, decimal = 4) {
-  if (name == "Phi" || name == "lambda" || name == "nu") {
+stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, 
+                             CI = TRUE, level = 0.95, hpd = TRUE, decimal = 4) {
+  if (name == "Phi") {
     for (chain in 1:num.chains) {
       cat("Chain", chain, "\n")
       mcmc <- dim(mcmc.chains[[chain]])[1]
       num.triplets <- dim(mcmc.chains[[chain]])[2]
-      
       triplets <- t(combn(1:num.entities, 3))
       if(num.triplets!=nrow(triplets)){stop("Number of triplets given N is not equal to the length of Phi")}
-      target_triplet.idx <- which(apply(triplets, 1, function(row) 1 %in% row))
-      num.target_triplets <- length(target_triplet.idx)
 
       ## Compute the mean and median
-      means <- apply(mcmc.chains[[chain]][,target_triplet.idx], 2, mean)
-      medians <- apply(mcmc.chains[[chain]][,target_triplet.idx], 2, median)
+      means <- apply(mcmc.chains[[chain]], 2, mean)
+      medians <- apply(mcmc.chains[[chain]], 2, median)
+      sds <- apply(mcmc.chains[[chain]], 2, sd)
+      
+      ## Compute credible intervals for each trianglar parameter
+      if (CI) {
+        if (hpd) {
+          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
+          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
+          lower <- hpd.int[ , "lower"]
+          upper <- hpd.int[ , "upper"]
+        } else {
+          pr <- c((1-level)/2, 1-(1-level)/2)
+          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          lower <- q[1, ]
+          upper <- q[2, ]
+        }
+        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
+      } else {
+        CI.str <- NULL
+      }
+      
       stats <- data.frame(Variable = paste0(name, "_", 
-                                            triplets[target_triplet.idx,1], 
-                                            triplets[target_triplet.idx,2], 
-                                            triplets[target_triplet.idx,3]),
+                                            triplets[,1], 
+                                            triplets[,2], 
+                                            triplets[,3]),
                           Mean     = round(means, decimal),
-                          Median   = round(medians, decimal))
+                          Median   = round(medians, decimal),
+                          SD       = round(sds, decimal),
+                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
+                          )
+      print(stats, row.names = FALSE)
+      cat("----------------------------\n")
+    }
+    return(means)
+  } else if (name == "lambad" || name == "nu") {
+    for (chain in 1:num.chains) {
+      cat("Chain", chain, "\n")
+      mcmc <- dim(mcmc.chains[[chain]])[1]
+      num.free <- dim(mcmc.chains[[chain]])[2]
+      
+      ## Compute the mean and median
+      means <- apply(mcmc.chains[[chain]], 2, mean)
+      medians <- apply(mcmc.chains[[chain]], 2, median)
+      sds <- apply(mcmc.chains[[chain]], 2, sd)
+      
+      ## Compute credible intervals for each trianglar parameter
+      if (CI) {
+        if (hpd) {
+          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
+          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
+          lower <- hpd.int[ , "lower"]
+          upper <- hpd.int[ , "upper"]
+        } else {
+          pr <- c((1-level)/2, 1-(1-level)/2)
+          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          lower <- q[1, ]
+          upper <- q[2, ]
+        }
+        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
+      } else {
+        CI.str <- NULL
+      }
+      
+      stats <- data.frame(Variable = paste0(name, "_", 1:num.free),
+                          Mean     = round(means, decimal),
+                          Median   = round(medians, decimal),
+                          SD       = round(sds, decimal),
+                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
+      )
       print(stats, row.names = FALSE)
       cat("----------------------------\n")
     }
@@ -547,9 +595,32 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, de
       ## Compute the mean and median
       means <- apply(mcmc.chains[[chain]], 2, mean)
       medians <- apply(mcmc.chains[[chain]], 2, median)
+      sds <- apply(mcmc.chains[[chain]], 2, sd)
+      
+      ## Compute credible intervals for each trianglar parameter
+      if (CI) {
+        if (hpd) {
+          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
+          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
+          lower <- hpd.int[ , "lower"]
+          upper <- hpd.int[ , "upper"]
+        } else {
+          pr <- c((1-level)/2, 1-(1-level)/2)
+          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          lower <- q[1, ]
+          upper <- q[2, ]
+        }
+        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
+      } else {
+        CI.str <- NULL
+      }
+      
       stats <- data.frame(Variable = paste0(name, "_", 1:num.entities),
                           Mean     = round(means, decimal),
-                          Median   = round(medians, decimal))
+                          Median   = round(medians, decimal),
+                          SD       = round(sds, decimal),
+                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
+                          )
       print(stats, row.names = FALSE)
       cat("----------------------------\n")
     }
@@ -565,9 +636,32 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, de
       ## Compute the mean and median
       means <- apply(mcmc.chains[[chain]], 2, mean)
       medians <- apply(mcmc.chains[[chain]], 2, median)
+      sds     <- apply(mcmc.chains[[chain]], 2, sd)
+      
+      ## Compute credible intervals for each trianglar parameter
+      if (CI) {
+        if (hpd) {
+          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
+          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
+          lower <- hpd.int[ , "lower"]
+          upper <- hpd.int[ , "upper"]
+        } else {
+          pr <- c((1-level)/2, 1-(1-level)/2)
+          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          lower <- q[1, ]
+          upper <- q[2, ]
+        }
+        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
+      } else {
+        CI.str <- NULL
+      }
+      
       stats <- data.frame(Variable = paste0(name, "_", pairs[,1], pairs[,2]),
                           Mean     = round(means, decimal),
-                          Median   = round(medians, decimal))
+                          Median   = round(medians, decimal),
+                          SD       = round(sds, decimal),
+                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
+                          )
       print(stats, row.names = FALSE)
       cat("----------------------------\n")
     }
@@ -580,9 +674,32 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, de
       ## Compute the mean and median
       means <- apply(mcmc.chains[[chain]], 2, mean)
       medians <- apply(mcmc.chains[[chain]], 2, median)
+      sds <- apply(mcmc.chains[[chain]], 2, sd)
+      
+      ## Compute credible intervals for each trianglar parameter
+      if (CI) {
+        if (hpd) {
+          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
+          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
+          lower <- hpd.int[ , "lower"]
+          upper <- hpd.int[ , "upper"]
+        } else {
+          pr <- c((1-level)/2, 1-(1-level)/2)
+          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          lower <- q[1, ]
+          upper <- q[2, ]
+        }
+        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
+      } else {
+        CI.str <- NULL
+      }
+      
       stats <- data.frame(Variable = name,
                           Mean     = round(means, decimal),
-                          Median   = round(medians, decimal))
+                          Median   = round(medians, decimal),
+                          SD       = round(sds, decimal),
+                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
+                          )
       print(stats, row.names = FALSE)
       cat("----------------------------\n")
     }
@@ -607,20 +724,39 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, de
 # Plots the autocorrelation function (ACF) for the given MCMC samples, overlaying results from all chains.
 
 plot.ACFs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
-  if (name == "Phi" || name == "lambda" || name == "nu") {
+  if (name == "Phi") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.triplets <- dim(mcmc.chains[[1]])[2]
-    
     triplets <- t(combn(1:num.entities, 3))
     if(num.triplets!=nrow(triplets)){stop("Number of triplets given N is not equal to the length of Phi")}
-    target_triplet.idx <- which(apply(triplets, 1, function(row) 1 %in% row))
-    num.target_triplets <- length(target_triplet.idx)
     
     ## Set up the plotting area
-    par(mfrow = c(1, num.target_triplets), mar = c(1, 2, 1.5, 1), oma = c(1, 1, 2, 1))
+    par(mfrow = c(1, num.triplets), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
     
     ## Loop over each triplet
-    for (idx in target_triplet.idx) {
+    for (idx in 1:num.triplets) {
+      acf.base <- acf(mcmc.chains[[1]][, idx], plot = FALSE)
+      plot(acf.base, col = 1)
+      title(main = paste0(name, "_", triplets[idx,1], triplets[idx,2], triplets[idx,3]))
+      
+      # Overlay ACF lines from remaining chains
+      if (num.chains > 1) {
+        for (i in 2:num.chains) {
+          acf.chain <- acf(mcmc.chains[[i]][, idx], plot = FALSE)
+          lines(acf.chain$lag, acf.chain$acf, col = i, lwd = 2)
+        }
+      }
+    }
+    mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
+  } else if (name == "lambda" || name == "nu") {
+    mcmc <- dim(mcmc.chains[[1]])[1]
+    num.free <- dim(mcmc.chains[[1]])[2]
+    
+    ## Set up the plotting area
+    par(mfrow = c(1, num.free), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
+    
+    ## Loop over each triplet
+    for (idx in 1:num.free) {
       acf.base <- acf(mcmc.chains[[1]][, idx], plot = FALSE)
       plot(acf.base, col = 1)
       title(main = paste0(name, "_", triplets[idx,1], triplets[idx,2], triplets[idx,3]))
@@ -723,20 +859,40 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
 
 compute.CIs <- function(num.chains = 1, mcmc.chains, name, num.entities, 
                         level = 0.95, decimal = 3, hpd = TRUE) {
-  if (name == "Phi" || name == "lambda" || name == "nu") {
+  if (name == "Phi") {
     cat("Credible Intervals for", name, ":\n")
     for (chain in 1:num.chains) {
       cat("Chain", chain, "\n")
       mcmc <- dim(mcmc.chains[[chain]])[1]
       num.triplets <- dim(mcmc.chains[[chain]])[2]
-      
       triplets <- t(combn(1:num.entities, 3))
       if(num.triplets!=nrow(triplets)){stop("Number of triplets given N is not equal to the length of Phi")}
-      target_triplet.idx <- which(apply(triplets, 1, function(row) 1 %in% row))
-      num.target_triplets <- length(target_triplet.idx)
       
       ## Compute credible intervals for each triplet
-      for (idx in target_triplet.idx) {
+      for (idx in 1:num.triplets) {
+        if (hpd) {
+          mcmc.obj <- as.mcmc(mcmc.chains[[chain]][, idx])
+          hpd.int <- coda::HPDinterval(mcmc.obj, prob = level)
+          lower <- hpd.int[1, "lower"]
+          upper <- hpd.int[1, "upper"]
+        } else {
+          lower <- quantile(mcmc.chains[[chain]][, idx], probs = (1-level)/2)
+          upper <- quantile(mcmc.chains[[chain]][, idx], probs = 1-(1-level)/2)
+        }
+        cat(paste0(name, "_", triplets[idx,1], triplets[idx,2], triplets[idx,3], 
+                   ": [", round(lower, decimal), ", ", round(upper, decimal), "]\n"))
+      }
+      cat("----------------------------\n")
+    }
+  } else if (name == "lambda" || name == "nu") {
+    cat("Credible Intervals for", name, ":\n")
+    for (chain in 1:num.chains) {
+      cat("Chain", chain, "\n")
+      mcmc <- dim(mcmc.chains[[chain]])[1]
+      num.free <- dim(mcmc.chains[[chain]])[2]
+      
+      ## Compute credible intervals for each triplet
+      for (idx in 1:num.free) {
         if (hpd) {
           mcmc.obj <- as.mcmc(mcmc.chains[[chain]][, idx])
           hpd.int <- coda::HPDinterval(mcmc.obj, prob = level)
@@ -843,7 +999,7 @@ mcmc.extract <- function(chains, name, num.entities, rhat = FALSE, ess = FALSE) 
   mcmc.chains <- lapply(chains, function(chain) chain[[name]])
   num.chains <- length(mcmc.chains)
   
-  if (name == "Phi" || name == "lambda" || name == "nu") {
+  if (name == "Phi") {
     mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
     
     ## Compute Gelman-Rubin diagnostic (Rhat)
@@ -856,14 +1012,35 @@ mcmc.extract <- function(chains, name, num.entities, rhat = FALSE, ess = FALSE) 
       num.triplets <- dim(mcmc.chains[[chain]])[2]
       triplets <- t(combn(1:num.entities, 3))
       if(num.triplets!=nrow(triplets)){stop(paste("Number of triplets given num.triplets is not equal to the length of", name))}
-      target_triplet.idx <- which(apply(triplets, 1, function(row) 1 %in% row))
-      num.target_triplets <- length(target_triplet.idx)
       
       ## Compute Effective Sample Size (ESS)
       if (ess) {
         cat("Chain", chain, "\n")
         cat("Effective Sample Size (ESS) : \n")
-        for (idx in target_triplet.idx) {
+        for (idx in 1:num.triplets) {
+          ess_vals <- effectiveSize(mcmc.objs[[chain]][ ,idx])
+          cat(paste0(name, "_", triplets[idx,1], triplets[idx,2], triplets[idx,3]), 
+              round(ess_vals, digits = 0), "/", length(mcmc.objs[[chain]][ ,idx]), "\n", sep = " ") 
+        }
+      }
+    }
+  } else if (name == "lambda" || name == "nu") {
+    mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
+    
+    ## Compute Gelman-Rubin diagnostic (Rhat)
+    if (rhat) {
+      rhat_vals <- gelman.diag(mcmc.objs, autoburnin = FALSE)$psrf[, 1]
+      cat("        Rhat values         :", round(rhat_vals, digits = 4), "\n", sep = " ")
+    }
+    
+    for (chain in 1:num.chains) {
+      num.free <- dim(mcmc.chains[[chain]])[2]
+      
+      ## Compute Effective Sample Size (ESS)
+      if (ess) {
+        cat("Chain", chain, "\n")
+        cat("Effective Sample Size (ESS) : \n")
+        for (idx in 1:num.free) {
           ess_vals <- effectiveSize(mcmc.objs[[chain]][ ,idx])
           cat(paste0(name, "_", triplets[idx,1], triplets[idx,2], triplets[idx,3]), 
               round(ess_vals, digits = 0), "/", length(mcmc.objs[[chain]][ ,idx]), "\n", sep = " ") 
@@ -983,12 +1160,15 @@ create.bin_df <- function(M.vec, names = NULL, num.entities = NULL) {
 # Return value: An directed graph created from bin_df.
 
 plot.network <- function(bin_df, edge.label = FALSE, draw.flag = TRUE, 
-                         weight = c("diff", "prop"), layout = c("fr", "circle"), tie_mode = c("skip", "thin")) 
-{
+                         weight = c("diff", "prop"), layout = c("fr", "circle"), 
+                         tie_mode = c("skip", "thin")) {
   ## Preparation
   weight <- match.arg(weight)
   layout <- match.arg(layout)
   tie_mode <- match.arg(tie_mode)
+  
+  ## Set up the plotting area
+  par(mfrow = c(1, 1), mar = c(1, 2, 1.5, 1), oma = c(1, 1, 2, 1))
   
   ## Setting nodes and edges
   nodes_df <- data.frame(name = sort(unique(c(bin_df$player1, bin_df$player2))))
@@ -1044,7 +1224,7 @@ plot.network <- function(bin_df, edge.label = FALSE, draw.flag = TRUE,
   if (draw.flag) {
     plot(g,
          layout = layout_coords,
-         vertex.size = 30,
+         vertex.size = 35,
          vertex.color = "grey95",
          vertex.frame.color = "grey40",
          vertex.label.color = "grey10",
@@ -1063,6 +1243,62 @@ plot.network <- function(bin_df, edge.label = FALSE, draw.flag = TRUE,
 
 
 
+###------------------------###
+###    Compute Phi.true    ###
+###------------------------###
+
+## INPUT:
+# num.entities: Number of entities (e.g., items and players).
+# weights:      A numeric vector of weights for the basis.
+
+## OUTPUT:
+# Phi: The constructed Phi vector of length num.triplets.
+
+compute.Phi.true <- function(num.entities = NULL, weights = NULL) {
+  ## Preparation
+  pairs <- t(combn(num.entities, 2))
+  num.pairs <- nrow(pairs)
+  triplets <- t(combn(num.entities, 3))
+  num.triplets <- nrow(triplets)
+  if(num.triplets!=nrow(triplets)){stop("Number of triplets given len(s) is not equal to the length of Phi")}
+  
+  ## Indexing maps of pairs (i,j)
+  pair.map <- matrix(0, N, N)
+  for(idx in 1:num.pairs) {
+    pair.map[pairs[idx,1], pairs[idx,2]] <- idx
+  }
+  
+  ## Build G = grad (num.pairs x N)
+  G_i <- rep(1:num.pairs, 2)        # row indices
+  G_j <- c(pairs[, 1], pairs[, 2])  # column indices
+  G_x <- c(rep(1, num.pairs), rep(-1, num.pairs))
+  G <- sparseMatrix(i = G_i, j = G_j, x = G_x, dims = c(num.pairs, N))
+  
+  ## Build C.ast = curl* (num.pairs x num.triplets)
+  pair.map.vec <- as.vector(pair.map)
+  e_ij <- pair.map.vec[triplets[, 1] + (triplets[, 2] - 1) * N]
+  e_jk <- pair.map.vec[triplets[, 2] + (triplets[, 3] - 1) * N]
+  e_ik <- pair.map.vec[triplets[, 1] + (triplets[, 3] - 1) * N]
+  C_i <- c(e_ij, e_jk, e_ik)  # row indices
+  C_j <- c(1:num.triplets, 1:num.triplets, 1:num.triplets)  # column indices
+  C_x <- c(rep(1, num.triplets), rep(1, num.triplets), rep(-1, num.triplets))
+  C.ast <- sparseMatrix(i = C_i, j = C_j, x = C_x, dims = c(num.pairs, num.triplets))
+  
+  ## Build A (basis of ker(C.ast)), H (orthogonal complement)
+  # Compute SVD of C.ast: C.ast = U D V^T
+  sv <- svd(C.ast, nu = 0, nv = num.triplets)
+  C.ast.rank <- sum(sv$d > 1e-10) # rank of C.ast
+  if(num.free!=C.ast.rank){stop("Number of free basises is not equal to the rank of C.ast")}
+
+  # H: num.triplets x (num.triplets-k) orthonormal complement
+  H <- if (C.ast.rank > 0) sv$v[, 1:C.ast.rank, drop = FALSE] else matrix(0, num.triplets, 0)
+  
+  return(H %*% weights)
+}
+
+
+
+
 ###----------------------###
 ###    Compute M.true    ###
 ###----------------------###
@@ -1071,7 +1307,7 @@ plot.network <- function(bin_df, edge.label = FALSE, draw.flag = TRUE,
 # num.entities: Number of entities (e.g., items and players).
 # freq.vec:     Integer vector of length choose(num.entities, 2);
 # s:            A N×1 vector representing the true score of each subject;
-# Phi:          A m×1 vector representing the true triangular parameters;
+# Phi.prior:    A num.triplets×1 vector representing the triangular parameters.
 
 ## OUTPUT:
 # Returns An num.entities × num.entities integer matrix of simulated win counts.
@@ -1084,35 +1320,32 @@ compute.M.true <- function(num.entities = NULL, s = NULL, Phi = NULL) {
   triplets <- t(combn(num.entities, 3))
   if(num.triplets!=nrow(triplets)){stop("Number of triplets given len(s) is not equal to the length of Phi")}
   
-  triplet.map <- array(0, dim=c(num.entities, num.entities, num.entities))
-  for(idx in 1:num.triplets) {
-    triplet.map[triplets[idx,1], triplets[idx,2], triplets[idx,3]] <- idx
+  ## Indexing maps of pairs (i,j)
+  pair.map <- matrix(0, N, N)
+  for(idx in 1:num.pairs) {
+    pair.map[pairs[idx,1], pairs[idx,2]] <- idx
   }
   
-  ## Helper function: draw out the scalar 'input.vec_ijk' from the vector 'input.vec'
-  draw.triplet <- function(i,j,k, input.vec) {
-    if (i == j || j == k || i == k) return(0)
-    idx <- c(i,j,k)
-    asc.idx <- sort(idx)
-    input.idx <- triplet.map[asc.idx[1], asc.idx[2], asc.idx[3]]
-    if (input.idx == 0) return(0)
-    
-    sign <- sign((idx[2]-idx[1]) * (idx[3]-idx[1]) * (idx[3]-idx[2]))
-    return(sign*input.vec[input.idx])
-  }
+  ## Build G = grad (num.pairs x N)
+  G_i <- rep(1:num.pairs, 2)        # row indices
+  G_j <- c(pairs[, 1], pairs[, 2])  # column indices
+  G_x <- c(rep(1, num.pairs), rep(-1, num.pairs))
+  G <- sparseMatrix(i = G_i, j = G_j, x = G_x, dims = c(num.pairs, N))
   
-  ## match-up function: M.true = trans.true + int.true
-  grad.true <- s[pairs[,1]] - s[pairs[,2]]
-  curl.true <- numeric(num.pairs)
-  for (p in 1:num.pairs) {
-    i <- pairs[p,1]
-    j <- pairs[p,2]
-    for (k in (1:N)[-c(i, j)]) {
-      curl.true[p] <- curl.true[p] + draw.triplet(i,j,k, Phi)
-    }
-  }
+  ## Build C.ast = curl* (num.pairs x num.triplets)
+  pair.map.vec <- as.vector(pair.map)
+  e_ij <- pair.map.vec[triplets[, 1] + (triplets[, 2] - 1) * N]
+  e_jk <- pair.map.vec[triplets[, 2] + (triplets[, 3] - 1) * N]
+  e_ik <- pair.map.vec[triplets[, 1] + (triplets[, 3] - 1) * N]
+  C_i <- c(e_ij, e_jk, e_ik)  # row indices
+  C_j <- c(1:num.triplets, 1:num.triplets, 1:num.triplets)  # column indices
+  C_x <- c(rep(1, num.triplets), rep(1, num.triplets), rep(-1, num.triplets))
+  C.ast <- sparseMatrix(i = C_i, j = C_j, x = C_x, dims = c(num.pairs, num.triplets))
+  
+  ## Match-up function: M = grad s + curl* \Phi = Gs + C.ast \Phi
+  grad.true <- as.vector(G %*% s)
+  curl.true <- as.vector(C.ast %*% Phi)
   M.true <- grad.true + curl.true
-  
   result <- cbind(grad.true, curl.true, M.true)
   colnames(result) <- c("grad", "curl", "M")
   return(result)
@@ -1129,7 +1362,7 @@ compute.M.true <- function(num.entities = NULL, s = NULL, Phi = NULL) {
 # num.entities: Number of entities (e.g., items and players).
 # freq.vec:     Integer vector of length choose(num.entities, 2);
 # s:            A N×1 vector representing the true score of each subject;
-# Phi:          A m×1 vector representing the true triangular parameters;
+# Phi.prior:    A num.triplets×1 vector representing the triangular parameters;
 # seed:         Integer: Random seed for reproducibility.
 
 ## OUTPUT:
@@ -1137,43 +1370,42 @@ compute.M.true <- function(num.entities = NULL, s = NULL, Phi = NULL) {
 
 generate.comparisons <- function(num.entities = NULL, freq.vec = NULL, 
                                  s = NULL, Phi = NULL, seed = 73) {
+  set.seed(seed)
   pairs <- t(combn(num.entities, 2))
   num.pairs <- nrow(pairs)
   num.triplets <- length(Phi)
   triplets <- t(combn(1:num.entities, 3))
   if(num.triplets!=nrow(triplets)){stop("Number of triplets given len(s) is not equal to the length of Phi")}
   
-  triplet.map <- array(0, dim=c(num.entities, num.entities, num.entities))
-  for(idx in 1:num.triplets) {
-    triplet.map[triplets[idx,1], triplets[idx,2], triplets[idx,3]] <- idx
-  }
-  
   ## Initiate an N×N matrix storing results (diagonal is NA)
   result <- matrix(NA_integer_, nrow = num.entities, ncol = num.entities)
   rownames(result) <- colnames(result) <- paste0("Entity", 1:num.entities)
   
-  ## Helper function: draw out the scalar 'input.vec_ijk' from the vector 'input.vec'
-  draw.triplet <- function(i,j,k, input.vec) {
-    if (i == j || j == k || i == k) return(0)
-    idx <- c(i,j,k)
-    asc.idx <- sort(idx)
-    input.idx <- triplet.map[asc.idx[1], asc.idx[2], asc.idx[3]]
-    if (input.idx == 0) return(0)
-    
-    sign <- sign((idx[2]-idx[1]) * (idx[3]-idx[1]) * (idx[3]-idx[2]))
-    return(sign*input.vec[input.idx])
+  ## Indexing maps of pairs (i,j)
+  pair.map <- matrix(0, N, N)
+  for(idx in 1:num.pairs) {
+    pair.map[pairs[idx,1], pairs[idx,2]] <- idx
   }
   
-  ## Simulate for each pair (i,j)
-  grad.flow <- s[pairs[,1]] - s[pairs[,2]]
-  curl.flow <- numeric(num.pairs)
-  for (p in 1:num.pairs) {
-    i <- pairs[p,1]
-    j <- pairs[p,2]
-    for (k in (1:N)[-c(i, j)]) {
-      curl.flow[p] <- curl.flow[p] + draw.triplet(i,j,k, Phi)
-    }
-  }
+  ## Build G = grad (num.pairs x N)
+  G_i <- rep(1:num.pairs, 2)        # row indices
+  G_j <- c(pairs[, 1], pairs[, 2])  # column indices
+  G_x <- c(rep(1, num.pairs), rep(-1, num.pairs))
+  G <- sparseMatrix(i = G_i, j = G_j, x = G_x, dims = c(num.pairs, N))
+  
+  ## Build C.ast = curl* (num.pairs x num.triplets)
+  pair.map.vec <- as.vector(pair.map)
+  e_ij <- pair.map.vec[triplets[, 1] + (triplets[, 2] - 1) * N]
+  e_jk <- pair.map.vec[triplets[, 2] + (triplets[, 3] - 1) * N]
+  e_ik <- pair.map.vec[triplets[, 1] + (triplets[, 3] - 1) * N]
+  C_i <- c(e_ij, e_jk, e_ik)  # row indices
+  C_j <- c(1:num.triplets, 1:num.triplets, 1:num.triplets)  # column indices
+  C_x <- c(rep(1, num.triplets), rep(1, num.triplets), rep(-1, num.triplets))
+  C.ast <- sparseMatrix(i = C_i, j = C_j, x = C_x, dims = c(num.pairs, num.triplets))
+  
+  ## Match-up function: M = grad s + curl* \Phi = Gs + C.ast \Phi
+  grad.flow <- as.vector(G %*% s)
+  curl.flow <- as.vector(C.ast %*% Phi)
   M.vec <- grad.flow + curl.flow
   
   p.vec <- 1 / (1 + exp(-M.vec))

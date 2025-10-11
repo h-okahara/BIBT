@@ -170,20 +170,23 @@ database$network.sumo <- plot.network(database$sumo, draw.flag = FALSE,
 
 ## Generate artificial data for 5 entities
 N <- 5
+num.free <- choose(N-1,2)
 database$artificial.name5 <- paste("Entity", 1:N)
 num.pairs <- ncol(combn(N, 2))
-database$freq.true5 <- rep(20, num.pairs)
-database$s.true5 <- c(1,2,3,4,5)
-database$Phi.true5 <- rep(0, ncol(combn(N, 3)))
-database$Phi.true5[1] <- 1.5  # Phi_123
-database$Phi.true5[2] <- 0.5  # Phi_124
-database$M.true5 <- compute.M.true(num.entities = N, 
-                                   s = database$s.true5, Phi = database$Phi.true5)
+database$freq.true5 <- rep(100, num.pairs)
+database$s.true5 <- c(-2,-1,0,1,2)
+database$w.true5 <- rep(0, num.free)
+database$w.true5[1] <- 3
+database$Phi.true5 <- compute.Phi.true(num.entities = N, weights = database$w.true5)
+database$Phi.true5 <- round(database$Phi.true5, 2)
+database$M.true5 <- compute.M.true(num.entities = N,
+                                   s = database$s.true5, 
+                                   Phi = database$Phi.true5)
 
 ## Name the rows and columns
 database$artificial5 <- generate.comparisons(num.entities = N, 
                                              freq.vec = database$freq.true5, 
-                                             s = database$s.true5, 
+                                             s = database$s.true5,
                                              Phi = database$Phi.true5)
 rownames(database$artificial5) <- colnames(database$artificial5) <- database$artificial.name5
 
@@ -199,19 +202,18 @@ database$network.true5 <- plot.network(database$artificial5, draw.flag = FALSE,
 
 ## Generate artificial data for 8 entities
 N <- 8
+num.free <- choose(N-1,2)
 database$artificial.name8 <- paste("Entity", 1:N)
 num.pairs <- ncol(combn(N, 2))
-database$freq.true8 <- rep(30, num.pairs)
+database$freq.true8 <- rep(200, num.pairs)
 database$s.true8 <- c(1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5) 
 database$s.true8 <- database$s.true8 - mean(database$s.true8)
-database$Phi.true8 <- rep(0, ncol(combn(N, 3)))
-database$Phi.true8[1]  <- 1.5  # Phi_123
-database$Phi.true8[2]  <- 1.2  # Phi_124
-database$Phi.true8[10] <- 1.2  # Phi_137
-#database$Phi.true8[15] <- 1    # Phi_148
-#database$Phi.true8[20] <- 0.8  # Phi_168
+database$w.true8 <- rep(0, num.free)
+database$w.true8[1] <- 5
+database$Phi.true8 <- compute.Phi.true(num.entities = N, weights = database$w.true8)
 database$M.true8 <- compute.M.true(num.entities = N, 
-                                   s = database$s.true8, Phi = database$Phi.true8)
+                                   s = database$s.true8, 
+                                   Phi = database$Phi.true8)
 
 ## Name the rows and columns
 database$artificial8 <- generate.comparisons(num.entities = N, 

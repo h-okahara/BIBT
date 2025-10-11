@@ -12,7 +12,8 @@ library(bayesplot)
 library(BayesLogit)
 
 library(MASS)
-library(matrixStats) # for test
+library(Matrix)
+# library(matrixStats)
 library(truncdist)
 library(TruncatedNormal)
 
