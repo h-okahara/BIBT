@@ -15,19 +15,19 @@ source("database.R")
 #N <- length(entities.name)  # number of entities
 
 ## For artificial data.
-N <- 5
+N <- 10
 X <- database[[paste0("artificial", N)]]
 entities.name <- database[[paste0("artificial.name", N)]]
 network.true <- database[[paste0("network.true", N)]]
-plot.network(X, weight = "prop", layout = "fr", tie_mode = "thin")
+plot.network(database[[paste0("df.bin", N)]], weight = "prop", layout = "fr", tie_mode = "thin")
 
 ## Preparation
 triplets <- t(combn(1:N, 3))
 num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
 num.kernel <- ncol(combn(N-1,3))
 num.free <- num.triplets-num.kernel
-num.iter <- 100000
-num.burn <- num.iter/5
+num.iter <- 10000
+num.burn <- num.iter/2
 
 ######################  END import & setting  ##################################
 
@@ -76,9 +76,8 @@ isomorphic(network.estimates, network.true)
 
 ## Prior specification
 num.chains <- 1
-param.name <- "Phi"  # Options: (s, Phi, lambda, tau, nu, xi, M)
+param.name <- "lambda"  # Options: (s, Phi, lambda, tau, nu, xi, M)
 s.prior <- rep(0, N)
-sigma.prior <- 3
 Phi.prior <- rep(0, num.triplets)
 lambda.prior <- rep(1, num.free)
 tau.prior <- 1
@@ -86,7 +85,7 @@ nu.prior <- rep(1, num.free)
 xi.prior <- 1
 mcmc.results <- run.MCMCs(num.chains = num.chains, name = param.name, num.entities = N,
                           MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
-                          X, mcmc = num.iter, burn = num.burn, thin = 5, varepsilon = 1e-5,
+                          X, mcmc = num.iter, burn = num.burn, thin = 1, varepsilon = 1e-5,
                           s.prior = s.prior, sigma.prior = 1, Phi.prior = Phi.prior, 
                           lambda.prior = lambda.prior, tau.prior = tau.prior,
                           nu.prior = nu.prior, xi.prior = xi.prior)
@@ -98,7 +97,6 @@ specific.mcmc <- mcmc.extract(mcmc.results$all.mcmc, param.name, N, rhat = FALSE
 plot.MCMCs(num.chains, specific.mcmc, param.name, N)       # plot MCMC sample path
 plot.posteriors(num.chains, specific.mcmc, param.name, N)  # plot MCMC histgram
 plot.ACFs(num.chains, specific.mcmc, param.name, N)        # plot autocorrelation function (ACF)
-# compute.CIs(num.chains, specific.mcmc, param.name, N, level = 0.95, decimal = 3, hpd = TRUE) # compute credible intervals
 specific.mean <- stats.posteriors(num.chains, specific.mcmc, param.name, N, 
                                   CI = TRUE, level = 0.95, hpd = TRUE, decimal = 3)  # compute the mean, median and sds
 

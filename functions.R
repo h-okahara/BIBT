@@ -252,8 +252,8 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
     if(num.triplets!=nrow(triplets)){stop("Number of triplets given N is not equal to the length of Phi")}
 
     ## Set up the plotting area
-    num.row <- ifelse(num.triplets%%8==0, num.triplets %/% 8, num.triplets %/% 8 +1)
-    par(mfrow = c(num.row, 8), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
+    num.row <- ifelse(num.triplets%%10==0, num.triplets %/% 10, num.triplets %/% 10 +1)
+    par(mfrow = c(num.row, 10), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
     
     ## Loop over each triplet to plot MCMC paths
     for (idx in 1:num.triplets) {
@@ -273,8 +273,8 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
     num.free <- dim(mcmc.chains[[1]])[2]
     
     ## Set up the plotting area
-    num.row <- ifelse(num.free%%8==0, num.free %/% 8, num.free %/% 8 +1)
-    par(mfrow = c(num.row, 8), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
+    num.row <- ifelse(num.free%%10==0, num.free %/% 10, num.free %/% 10 +1)
+    par(mfrow = c(num.row, 10), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
     
     ## Loop over each triplet to plot MCMC paths
     for (idx in 1:num.free) {
@@ -374,8 +374,8 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, bin
     if(num.triplets!=nrow(triplets)){stop("Number of triplets given N is not equal to the length of Phi")}
     
     ## Set up the plotting area
-    num.row <- ifelse(num.triplets%%8==0, num.triplets %/% 8, num.triplets %/% 8 +1)
-    par(mfrow = c(num.row, 8), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
+    num.row <- ifelse(num.triplets%%10==0, num.triplets %/% 10, num.triplets %/% 10 +1)
+    par(mfrow = c(num.row, 10), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
     
     ## Loop over each triplet to plot histograms
     for (idx in 1:num.triplets) {
@@ -397,8 +397,8 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, bin
     num.free <- dim(mcmc.chains[[1]])[2]
     
     ## Set up the plotting area
-    num.row <- ifelse(num.free%%8==0, num.free %/% 8, num.free %/% 8 +1)
-    par(mfrow = c(num.row, 8), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
+    num.row <- ifelse(num.free%%10==0, num.free %/% 10, num.free %/% 10 +1)
+    par(mfrow = c(num.row, 10), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
     
     ## Loop over each triplet to plot histograms
     for (idx in 1:num.free) {
@@ -484,232 +484,6 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, bin
 
 
 
-###------------------------------------###
-###    Compute Posterior Statistics    ###
-###------------------------------------###
-
-## INPUT:
-# num.chains:   Number of MCMC chains;
-# mcmc.chains:  A list of specific MCMC samples from each chain;
-# name:         A string representing the name of parameters;
-# num.entities: Number of entities (e.g., items and players);
-# rhat:         Logical flag: if TRUE, compute and print credible intervals (lower and uppper bounds);
-# level:        The credible interval level (e.g., 0.95);
-# hpd:          Logical flag: if TRUE, return the Highest Posterior Density (HPD) interval;
-# decimal:      Number of decimal places.
-
-## OUTPUT:
-# For each chain, prints a data frame of posterior statistics (mean and median) for each parameter.
-
-stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, 
-                             CI = TRUE, level = 0.95, hpd = TRUE, decimal = 4) {
-  if (name == "Phi") {
-    for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
-      mcmc <- dim(mcmc.chains[[chain]])[1]
-      num.triplets <- dim(mcmc.chains[[chain]])[2]
-      triplets <- t(combn(1:num.entities, 3))
-      if(num.triplets!=nrow(triplets)){stop("Number of triplets given N is not equal to the length of Phi")}
-
-      ## Compute the mean and median
-      means <- apply(mcmc.chains[[chain]], 2, mean)
-      medians <- apply(mcmc.chains[[chain]], 2, median)
-      sds <- apply(mcmc.chains[[chain]], 2, sd)
-      
-      ## Compute credible intervals for each trianglar parameter
-      if (CI) {
-        if (hpd) {
-          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
-          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
-          lower <- hpd.int[ , "lower"]
-          upper <- hpd.int[ , "upper"]
-        } else {
-          pr <- c((1-level)/2, 1-(1-level)/2)
-          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
-          lower <- q[1, ]
-          upper <- q[2, ]
-        }
-        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
-      } else {
-        CI.str <- NULL
-      }
-      
-      stats <- data.frame(Variable = paste0(name, "_", 
-                                            triplets[,1], 
-                                            triplets[,2], 
-                                            triplets[,3]),
-                          Mean     = round(means, decimal),
-                          Median   = round(medians, decimal),
-                          SD       = round(sds, decimal),
-                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
-                          )
-      print(stats, row.names = FALSE)
-      cat("----------------------------\n")
-    }
-    return(means)
-  } else if (name == "lambad" || name == "nu") {
-    for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
-      mcmc <- dim(mcmc.chains[[chain]])[1]
-      num.free <- dim(mcmc.chains[[chain]])[2]
-      
-      ## Compute the mean and median
-      means <- apply(mcmc.chains[[chain]], 2, mean)
-      medians <- apply(mcmc.chains[[chain]], 2, median)
-      sds <- apply(mcmc.chains[[chain]], 2, sd)
-      
-      ## Compute credible intervals for each trianglar parameter
-      if (CI) {
-        if (hpd) {
-          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
-          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
-          lower <- hpd.int[ , "lower"]
-          upper <- hpd.int[ , "upper"]
-        } else {
-          pr <- c((1-level)/2, 1-(1-level)/2)
-          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
-          lower <- q[1, ]
-          upper <- q[2, ]
-        }
-        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
-      } else {
-        CI.str <- NULL
-      }
-      
-      stats <- data.frame(Variable = paste0(name, "_", 1:num.free),
-                          Mean     = round(means, decimal),
-                          Median   = round(medians, decimal),
-                          SD       = round(sds, decimal),
-                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
-      )
-      print(stats, row.names = FALSE)
-      cat("----------------------------\n")
-    }
-    return(means)
-  } else if (name == "s") {
-    for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
-      mcmc <- nrow(mcmc.chains[[chain]])
-      if(ncol(mcmc.chains[[chain]])!=num.entities){stop("Number of num.entities is not equal to the length of s")}
-      
-      ## Compute the mean and median
-      means <- apply(mcmc.chains[[chain]], 2, mean)
-      medians <- apply(mcmc.chains[[chain]], 2, median)
-      sds <- apply(mcmc.chains[[chain]], 2, sd)
-      
-      ## Compute credible intervals for each trianglar parameter
-      if (CI) {
-        if (hpd) {
-          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
-          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
-          lower <- hpd.int[ , "lower"]
-          upper <- hpd.int[ , "upper"]
-        } else {
-          pr <- c((1-level)/2, 1-(1-level)/2)
-          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
-          lower <- q[1, ]
-          upper <- q[2, ]
-        }
-        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
-      } else {
-        CI.str <- NULL
-      }
-      
-      stats <- data.frame(Variable = paste0(name, "_", 1:num.entities),
-                          Mean     = round(means, decimal),
-                          Median   = round(medians, decimal),
-                          SD       = round(sds, decimal),
-                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
-                          )
-      print(stats, row.names = FALSE)
-      cat("----------------------------\n")
-    }
-    return(means)
-  } else if (name == "M") {
-    for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
-      mcmc <- nrow(mcmc.chains[[chain]])
-      pairs <- t(combn(num.entities, 2))
-      num.pairs <- nrow(pairs)
-      if(ncol(mcmc.chains[[chain]])!=num.pairs){stop("Number of pairs is not equal to the length of M")}
-      
-      ## Compute the mean and median
-      means <- apply(mcmc.chains[[chain]], 2, mean)
-      medians <- apply(mcmc.chains[[chain]], 2, median)
-      sds     <- apply(mcmc.chains[[chain]], 2, sd)
-      
-      ## Compute credible intervals for each trianglar parameter
-      if (CI) {
-        if (hpd) {
-          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
-          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
-          lower <- hpd.int[ , "lower"]
-          upper <- hpd.int[ , "upper"]
-        } else {
-          pr <- c((1-level)/2, 1-(1-level)/2)
-          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
-          lower <- q[1, ]
-          upper <- q[2, ]
-        }
-        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
-      } else {
-        CI.str <- NULL
-      }
-      
-      stats <- data.frame(Variable = paste0(name, "_", pairs[,1], pairs[,2]),
-                          Mean     = round(means, decimal),
-                          Median   = round(medians, decimal),
-                          SD       = round(sds, decimal),
-                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
-                          )
-      print(stats, row.names = FALSE)
-      cat("----------------------------\n")
-    }
-    return(means)
-  } else {
-    for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
-      mcmc <- nrow(mcmc.chains[[chain]])
-      
-      ## Compute the mean and median
-      means <- apply(mcmc.chains[[chain]], 2, mean)
-      medians <- apply(mcmc.chains[[chain]], 2, median)
-      sds <- apply(mcmc.chains[[chain]], 2, sd)
-      
-      ## Compute credible intervals for each trianglar parameter
-      if (CI) {
-        if (hpd) {
-          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
-          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
-          lower <- hpd.int[ , "lower"]
-          upper <- hpd.int[ , "upper"]
-        } else {
-          pr <- c((1-level)/2, 1-(1-level)/2)
-          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
-          lower <- q[1, ]
-          upper <- q[2, ]
-        }
-        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
-      } else {
-        CI.str <- NULL
-      }
-      
-      stats <- data.frame(Variable = name,
-                          Mean     = round(means, decimal),
-                          Median   = round(medians, decimal),
-                          SD       = round(sds, decimal),
-                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
-                          )
-      print(stats, row.names = FALSE)
-      cat("----------------------------\n")
-    }
-    return(means)
-  }
-}
-
-
-
-
 ###--------------------------###
 ###    Plot ACFs for MCMC    ###
 ###--------------------------###
@@ -731,7 +505,8 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
     if(num.triplets!=nrow(triplets)){stop("Number of triplets given N is not equal to the length of Phi")}
     
     ## Set up the plotting area
-    par(mfrow = c(1, num.triplets), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
+    num.row <- ifelse(num.triplets%%10==0, num.triplets %/% 10, num.triplets %/% 10 +1)
+    par(mfrow = c(num.row, 10), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
     
     ## Loop over each triplet
     for (idx in 1:num.triplets) {
@@ -753,7 +528,8 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
     num.free <- dim(mcmc.chains[[1]])[2]
     
     ## Set up the plotting area
-    par(mfrow = c(1, num.free), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
+    num.row <- ifelse(num.triplets%%10==0, num.triplets %/% 10, num.triplets %/% 10 +1)
+    par(mfrow = c(num.row, 10), mar = c(2, 1, 2, 1), oma = c(1, 1, 2, 1))
     
     ## Loop over each triplet
     for (idx in 1:num.free) {
@@ -836,6 +612,232 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
     }
   }
   mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
+}
+
+
+
+
+###------------------------------------###
+###    Compute Posterior Statistics    ###
+###------------------------------------###
+
+## INPUT:
+# num.chains:   Number of MCMC chains;
+# mcmc.chains:  A list of specific MCMC samples from each chain;
+# name:         A string representing the name of parameters;
+# num.entities: Number of entities (e.g., items and players);
+# rhat:         Logical flag: if TRUE, compute and print credible intervals (lower and uppper bounds);
+# level:        The credible interval level (e.g., 0.95);
+# hpd:          Logical flag: if TRUE, return the Highest Posterior Density (HPD) interval;
+# decimal:      Number of decimal places.
+
+## OUTPUT:
+# For each chain, prints a data frame of posterior statistics (mean and median) for each parameter.
+
+stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, 
+                             CI = TRUE, level = 0.95, hpd = TRUE, decimal = 4) {
+  if (name == "Phi") {
+    for (chain in 1:num.chains) {
+      cat("Chain", chain, "\n")
+      mcmc <- dim(mcmc.chains[[chain]])[1]
+      num.triplets <- dim(mcmc.chains[[chain]])[2]
+      triplets <- t(combn(1:num.entities, 3))
+      if(num.triplets!=nrow(triplets)){stop("Number of triplets given N is not equal to the length of Phi")}
+      
+      ## Compute the mean and median
+      means <- apply(mcmc.chains[[chain]], 2, mean)
+      medians <- apply(mcmc.chains[[chain]], 2, median)
+      sds <- apply(mcmc.chains[[chain]], 2, sd)
+      
+      ## Compute credible intervals for each trianglar parameter
+      if (CI) {
+        if (hpd) {
+          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
+          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
+          lower <- hpd.int[ , "lower"]
+          upper <- hpd.int[ , "upper"]
+        } else {
+          pr <- c((1-level)/2, 1-(1-level)/2)
+          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          lower <- q[1, ]
+          upper <- q[2, ]
+        }
+        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
+      } else {
+        CI.str <- NULL
+      }
+      
+      stats <- data.frame(Variable = paste0(name, "_", 
+                                            triplets[,1], 
+                                            triplets[,2], 
+                                            triplets[,3]),
+                          Mean     = round(means, decimal),
+                          Median   = round(medians, decimal),
+                          SD       = round(sds, decimal),
+                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
+      )
+      print(stats, row.names = FALSE)
+      cat("----------------------------\n")
+    }
+    return(means)
+  } else if (name == "lambda" || name == "nu") {
+    for (chain in 1:num.chains) {
+      cat("Chain", chain, "\n")
+      mcmc <- dim(mcmc.chains[[chain]])[1]
+      num.free <- dim(mcmc.chains[[chain]])[2]
+      
+      ## Compute the mean and median
+      means <- apply(mcmc.chains[[chain]], 2, mean)
+      medians <- apply(mcmc.chains[[chain]], 2, median)
+      sds <- apply(mcmc.chains[[chain]], 2, sd)
+      
+      ## Compute credible intervals for each trianglar parameter
+      if (CI) {
+        if (hpd) {
+          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
+          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
+          lower <- hpd.int[ , "lower"]
+          upper <- hpd.int[ , "upper"]
+        } else {
+          pr <- c((1-level)/2, 1-(1-level)/2)
+          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          lower <- q[1, ]
+          upper <- q[2, ]
+        }
+        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
+      } else {
+        CI.str <- NULL
+      }
+      
+      stats <- data.frame(Variable = paste0(name, "_", 1:num.free),
+                          Mean     = round(means, decimal),
+                          Median   = round(medians, decimal),
+                          SD       = round(sds, decimal),
+                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
+      )
+      print(stats, row.names = FALSE)
+      cat("----------------------------\n")
+    }
+    return(means)
+  } else if (name == "s") {
+    for (chain in 1:num.chains) {
+      cat("Chain", chain, "\n")
+      mcmc <- nrow(mcmc.chains[[chain]])
+      if(ncol(mcmc.chains[[chain]])!=num.entities){stop("Number of num.entities is not equal to the length of s")}
+      
+      ## Compute the mean and median
+      means <- apply(mcmc.chains[[chain]], 2, mean)
+      medians <- apply(mcmc.chains[[chain]], 2, median)
+      sds <- apply(mcmc.chains[[chain]], 2, sd)
+      
+      ## Compute credible intervals for each trianglar parameter
+      if (CI) {
+        if (hpd) {
+          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
+          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
+          lower <- hpd.int[ , "lower"]
+          upper <- hpd.int[ , "upper"]
+        } else {
+          pr <- c((1-level)/2, 1-(1-level)/2)
+          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          lower <- q[1, ]
+          upper <- q[2, ]
+        }
+        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
+      } else {
+        CI.str <- NULL
+      }
+      
+      stats <- data.frame(Variable = paste0(name, "_", 1:num.entities),
+                          Mean     = round(means, decimal),
+                          Median   = round(medians, decimal),
+                          SD       = round(sds, decimal),
+                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
+      )
+      print(stats, row.names = FALSE)
+      cat("----------------------------\n")
+    }
+    return(means)
+  } else if (name == "M") {
+    for (chain in 1:num.chains) {
+      cat("Chain", chain, "\n")
+      mcmc <- nrow(mcmc.chains[[chain]])
+      pairs <- t(combn(num.entities, 2))
+      num.pairs <- nrow(pairs)
+      if(ncol(mcmc.chains[[chain]])!=num.pairs){stop("Number of pairs is not equal to the length of M")}
+      
+      ## Compute the mean and median
+      means <- apply(mcmc.chains[[chain]], 2, mean)
+      medians <- apply(mcmc.chains[[chain]], 2, median)
+      sds     <- apply(mcmc.chains[[chain]], 2, sd)
+      
+      ## Compute credible intervals for each trianglar parameter
+      if (CI) {
+        if (hpd) {
+          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
+          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
+          lower <- hpd.int[ , "lower"]
+          upper <- hpd.int[ , "upper"]
+        } else {
+          pr <- c((1-level)/2, 1-(1-level)/2)
+          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          lower <- q[1, ]
+          upper <- q[2, ]
+        }
+        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
+      } else {
+        CI.str <- NULL
+      }
+      
+      stats <- data.frame(Variable = paste0(name, "_", pairs[,1], pairs[,2]),
+                          Mean     = round(means, decimal),
+                          Median   = round(medians, decimal),
+                          SD       = round(sds, decimal),
+                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
+      )
+      print(stats, row.names = FALSE)
+      cat("----------------------------\n")
+    }
+    return(means)
+  } else {
+    for (chain in 1:num.chains) {
+      cat("Chain", chain, "\n")
+      mcmc <- nrow(mcmc.chains[[chain]])
+      
+      ## Compute the mean and median
+      means <- apply(mcmc.chains[[chain]], 2, mean)
+      medians <- apply(mcmc.chains[[chain]], 2, median)
+      sds <- apply(mcmc.chains[[chain]], 2, sd)
+      
+      ## Compute credible intervals for each trianglar parameter
+      if (CI) {
+        if (hpd) {
+          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
+          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
+          lower <- hpd.int[ , "lower"]
+          upper <- hpd.int[ , "upper"]
+        } else {
+          pr <- c((1-level)/2, 1-(1-level)/2)
+          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          lower <- q[1, ]
+          upper <- q[2, ]
+        }
+        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
+      } else {
+        CI.str <- NULL
+      }
+      
+      stats <- data.frame(Variable = name,
+                          Mean     = round(means, decimal),
+                          Median   = round(medians, decimal),
+                          SD       = round(sds, decimal),
+                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
+      )
+      print(stats, row.names = FALSE)
+      cat("----------------------------\n")
+    }
+    return(means)
+  }
 }
 
 
@@ -974,6 +976,7 @@ compute.CIs <- function(num.chains = 1, mcmc.chains, name, num.entities,
     }
   }
 }
+
 
 
 
@@ -1130,8 +1133,8 @@ create.bin_df <- function(M.vec, names = NULL, num.entities = NULL) {
   p <- plogis(M.vec)  # win probability
   
   df <- data.frame(
-    player1 = if (is.null(names)) pairs[,1] else names[pairs[,1]],
-    player2 = if (is.null(names)) pairs[,2] else names[pairs[,2]],
+    player1 = pairs[,1], #if (is.null(names)) pairs[,1] else names[pairs[,1]],
+    player2 = pairs[,2], #if (is.null(names)) pairs[,2] else names[pairs[,2]],
     win1    = p,
     win2    = 1-p
   )
@@ -1224,13 +1227,13 @@ plot.network <- function(bin_df, edge.label = FALSE, draw.flag = TRUE,
   if (draw.flag) {
     plot(g,
          layout = layout_coords,
-         vertex.size = 35,
+         vertex.size = 10,
          vertex.color = "grey95",
          vertex.frame.color = "grey40",
          vertex.label.color = "grey10",
          edge.width = E(g)$width,
          edge.color = E(g)$color,
-         edge.arrow.size = 0.8,
+         edge.arrow.size = 0.2,
          edge.curved = 0.1,
          edge.label = if (edge.label) E(g)$label else NA,
          edge.label.color = "grey20",
@@ -1346,7 +1349,7 @@ compute.M.true <- function(num.entities = NULL, s = NULL, Phi = NULL) {
   grad.true <- as.vector(G %*% s)
   curl.true <- as.vector(C.ast %*% Phi)
   M.true <- grad.true + curl.true
-  result <- cbind(grad.true, curl.true, M.true)
+  result <- round(cbind(grad.true, curl.true, M.true), 3)
   colnames(result) <- c("grad", "curl", "M")
   return(result)
 }
