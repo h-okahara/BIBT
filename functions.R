@@ -29,7 +29,6 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, varepsilon = NULL,
   N <- length(entity.name)  # number of entities
   pairs <- t(combn(N, 2))
   num.pairs <- nrow(pairs)  # number of unique (i,j) pairs
-  if(num.pairs!=nrow(X)){stop("Number of pairs is not equal to the length of X")}
   triplets <- t(combn(1:N, 3))
   num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
   num.kernel <- ncol(combn(N-1, 3))
@@ -47,7 +46,7 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, varepsilon = NULL,
   
   omega <- rep(0, num.pairs)
   kappa <- X$y_ij - X$n_ij/2
-  W.vec <- c(tau^2 * lambda^2, rep(varepsilon^2, num.kernel))
+  #W.vec <- c(tau^2 * lambda^2, rep(varepsilon^2, num.kernel))
   
   ## Indexing maps of pairs (i,j)
   pair.map <- matrix(0, N, N)
@@ -79,6 +78,8 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, varepsilon = NULL,
   
   # A: num.triplets x k basis of ker(C.ast),
   A <- if (C.ast.rank < num.triplets) sv$v[, (C.ast.rank+1):num.triplets, drop = FALSE] else matrix(0, num.triplets, 0)
+  Prec_kernel <- tcrossprod(A) / varepsilon^2
+  
   # H: num.triplets x (num.triplets-k) orthonormal complement
   H <- if (C.ast.rank > 0) sv$v[, 1:C.ast.rank, drop = FALSE] else matrix(0, num.triplets, 0)
   P <- t(cbind(H, A)) # P = (H,A)^T
@@ -108,22 +109,31 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, varepsilon = NULL,
     omega <- rpg(n = num.pairs, h = X$n_ij, z = M.vec)
     
     ## Updating s: N×1 score vector
-    A_s <- solve(Diagonal(N)/sigma^2 + crossprod(G, omega * G))
+    Prec_s <- Diagonal(N)/sigma^2 + crossprod(G, omega * G)
+    Prec_s <- forceSymmetric(Prec_s, uplo = "U")
+    U_s <- chol(Prec_s)
     B_s <- crossprod(G, kappa - omega * as.vector(C.ast %*% Phi))
-    s <- mvrnorm(n=1, mu = A_s %*% B_s, Sigma = A_s)
-    s <- s - mean(s) # Identification
+    tmp_s <- forwardsolve(t(U_s), B_s)
+    mu_s <- backsolve(U_s, tmp_s)
+    v_s <- rnorm(N)
+    z_s <- backsolve(U_s, v_s)
+    s <- mu_s + z_s
+    s <- s - mean(s)  # Identification
     
     ## Updating Phi: num.triplets×1 trianguler vector
-    Prec_Phi <- crossprod(P, Diagonal(x=1/W.vec) %*% P) + crossprod(C.ast, Diagonal(x=omega) %*% C.ast)
-    Prec_Phi <- (Prec_Phi + t(Prec_Phi))/2
-    U_t <- chol(Prec_Phi) # Upper triangular matrix
+    H.scaled <- H * rep(1/(tau * lambda), each = num.triplets)
+    Prec_prior <- tcrossprod(H.scaled) + Prec_kernel
+    Prec_likeligood <- crossprod(C.ast, Diagonal(x = omega) %*% C.ast)
+    Prec_Phi <- Prec_prior + Prec_likeligood
+    Prec_Phi <- forceSymmetric(Prec_Phi, uplo = "U")
+    U_Phi <- chol(Prec_Phi) 
     B_Phi <- crossprod(C.ast, kappa - omega * as.vector(G %*% s)) # Prec_Phi μ = B_Phi
-    tmp <- forwardsolve(t(U_t), B_Phi)  # Solve U_t^T y = B_Phi
-    mu_Phi <- backsolve(U_t, tmp)       # Solve y = U_t μ
-    v <- rnorm(num.triplets)            # v ~ N(0,I)
-    z <- backsolve(U_t, v)              # Solve U_t z = v, then z ~ N(0, (Prec_Phi)^{-1})
-    Phi <- mu_Phi + z
-    
+    tmp_Phi <- forwardsolve(t(U_Phi), B_Phi)  # Solve U_Phi^T y = B_Phi
+    mu_Phi <- backsolve(U_Phi, tmp_Phi)       # Solve y = U_Phi μ
+    v_Phi <- rnorm(num.triplets)              # v ~ N(0,I)
+    z_Phi <- backsolve(U_Phi, v_Phi)          # Solve U_Phi z = v, then z ~ N(0, (Prec_Phi)^{-1})
+    Phi <- mu_Phi + z_Phi
+  
     ## Updating lambda: num.free×1 vector
     theta <- as.vector(crossprod(H, Phi))
     b_lambda <- 1/nu + theta^2/(2*tau^2)
@@ -144,7 +154,7 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, varepsilon = NULL,
     xi <- 1/rgamma(1, shape = 1, rate = b_xi)
     
     ## Updating other parameters
-    W.vec <- c(tau^2 * lambda^2, rep(varepsilon^2, num.kernel))
+    #W.vec <- c(tau^2 * lambda^2, rep(varepsilon^2, num.kernel))
     grad.flow <- as.vector(G %*% s)
     curl.flow <- as.vector(C.ast %*% Phi)
     M.vec <- grad.flow + curl.flow
@@ -1418,9 +1428,3 @@ generate.comparisons <- function(num.entities = NULL, freq.vec = NULL,
   result[cbind(pairs[,2], pairs[,1])] <- freq.vec - win.freq.vec
   return(result)
 }
-
-
-
-
-
-
