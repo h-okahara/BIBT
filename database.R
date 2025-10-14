@@ -11,6 +11,8 @@
 ###        Import real-world data         ###
 ###---------------------------------------###
 
+####    BEGIN import citation data    ####
+#
 # Import from BradleyTerry2 package
 data(citations)
 database$citations4 <- countsToBinomial(citations) 
@@ -19,7 +21,6 @@ database$citations4$y_ij <- database$citations4$win1
 database$name4 <- c("Biometrika", "Comm Statist", "JASA", "JRSS-B")
 database$network.citations4 <- plot.network(database$citations4, draw.flag = FALSE, 
                                             weight = "prop", layout = "fr", tie_mode = "thin")
-
 
 
 # Cross-citations involving probability journals, giving total citations for the years 1987-88. 
@@ -44,8 +45,6 @@ database$citations6$n_ij <- database$citations6$win1 + database$citations6$win2
 database$citations6$y_ij <- database$citations6$win1
 database$network.citations6 <- plot.network(database$citations6, draw.flag = FALSE, 
                                             weight = "prop", layout = "fr", tie_mode = "thin")
-
-
 
 
 # Cross-citations involving statistics journals, giving total citations for the years 1987-89. 
@@ -81,8 +80,6 @@ database$citations8$n_ij <- database$citations8$win1 + database$citations8$win2
 database$citations8$y_ij <- database$citations8$win1
 database$network.citations8 <- plot.network(database$citations8, draw.flag = FALSE, 
                                             weight = "prop", layout = "fr", tie_mode = "thin")
-
-
 
 
 # Cross-citations involving applied statistics journals, giving total citations for the years 1987-89.
@@ -121,7 +118,7 @@ database$citations9$y_ij <- database$citations9$win1
 database$network.citations9 <- plot.network(database$citations9, draw.flag = FALSE, 
                                             weight = "prop", layout = "fr", tie_mode = "thin")
 
-
+####    END import citation data    ####
 
 
 # Real-world data (Sumo) Pairwise Comparison Data from 2005 to 2009
@@ -161,7 +158,103 @@ database$sumo$y_ij <- database$sumo$win1
 database$network.sumo <- plot.network(database$sumo, draw.flag = FALSE, 
                                       weight = "prop", layout = "fr", tie_mode = "thin")
 
+
+
+
+# Paired comparisons consists in tasting experiments conducted in the National 
+# Higher Institute for Education in the Food Industry in France in 2002.
+result.matrix <- matrix(c(
+   0, 39, 64, 40, 61, 76, 46, # 1
+  61,  0, 65, 59, 55, 85, 60, # 2
+  36, 35,  0, 31, 25, 41, 35, # 3
+  60, 41, 69,  0, 41, 80, 28, # 4
+  39, 45, 75, 59,  0, 71, 37, # 5
+  24, 15, 59, 20, 29,  0, 18, # 6
+  54, 40, 65, 72, 63, 82,  0  # 7
+), nrow = 7, byrow = TRUE)
+
+# Name the rows and columns
+rownames(result.matrix) <- colnames(result.matrix) <- 
+  database$name.cornflakes <- c("1","2","3","4","5","6","7")
+
+# Convert to binomial format using countsToBinomial
+database$cornflakes <- countsToBinomial(result.matrix)
+database$cornflakes$n_ij <- database$cornflakes$win1 + database$cornflakes$win2
+database$cornflakes$y_ij <- database$cornflakes$win1
+database$network.cornflakes <- plot.network(database$cornflakes, draw.flag = FALSE, 
+                                            weight = "prop", layout = "fr", tie_mode = "thin")
+
+
+
+
+####    BEGIN Sushi preference data collected in Kamishima (2003)    ####
+#
+# Sushi A (N = 10)
+sushiA.data <- read.csv("Sushi A.csv", header = FALSE, sep = " ")
+sushiA.data <- sushiA.data[2:nrow(sushiA.data), 3:12]
+sushiA.matrix <- matrix(0, nrow = 10, ncol = 10, dimnames = list(1:10, 1:10))
+
+# Name the rows and columns
+rownames(sushiA.matrix) <- colnames(sushiA.matrix) <-
+  database$name.sushiA <- c("shrimp", "sea eel", "tuna", "squid", "sea urchin",
+                            "salmon roe", "egg", "fatty tuna", "tuna roll", "cucumber  roll")
+
+pairs.list <- lapply(seq_len(nrow(sushiA.data)), function(i) {
+  row <- as.numeric(sushiA.data[i, ])
+  t(combn(row, 2))
+})
+pairs.list <- as.data.frame(do.call(rbind, pairs.list))
+colnames(pairs.list) <- c("winner", "loser")
+
+pairs.counts <- table(pairs.list)
+winner.idx <- as.numeric(rownames(pairs.counts)) + 1
+loser.idx <- as.numeric(colnames(pairs.counts)) + 1
+sushiA.matrix[winner.idx, loser.idx] <- pairs.counts
+
+# Convert to binomial format using countsToBinomial
+database$sushiA <- countsToBinomial(sushiA.matrix)
+database$sushiA$n_ij <- database$sushiA$win1 + database$sushiA$win2
+database$sushiA$y_ij <- database$sushiA$win1
+database$network.sushiA <- plot.network(database$sushiA, draw.flag = FALSE, 
+                                        weight = "prop", layout = "fr", tie_mode = "thin")
+
+
+# Sushi B (N = 100)
+sushiB.data <- read.csv("Sushi B.csv", header = FALSE, sep = " ")
+sushiB.data <- sushiB.data[2:nrow(sushiB.data), 3:12]
+sushiB.matrix <- matrix(0, nrow = 100, ncol = 100, dimnames = list(1:100, 1:100))
+
+# Name the rows and columns
+rownames(sushiB.matrix) <- colnames(sushiB.matrix) <- 
+  database$name.sushiB <- 1:100
+
+pairs.list <- lapply(seq_len(nrow(sushiB.data)), function(i) {
+  row <- as.numeric(sushiB.data[i, ])
+  t(combn(row, 2))
+})
+
+pairs.list <- as.data.frame(do.call(rbind, pairs.list))
+colnames(pairs.list) <- c("winner", "loser")
+
+pairs.counts <- table(pairs.list)
+winner.idx <- as.numeric(rownames(pairs.counts)) + 1
+loser.idx <- as.numeric(colnames(pairs.counts)) + 1
+sushiB.matrix[winner.idx, loser.idx] <- pairs.counts
+
+# Convert to binomial format using countsToBinomial
+database$sushiB <- countsToBinomial(sushiB.matrix)
+database$sushiB$n_ij <- database$sushiB$win1 + database$sushiB$win2
+database$sushiB$y_ij <- database$sushiB$win1
+database$network.sushiB <- plot.network(database$sushiB, draw.flag = FALSE, 
+                                        weight = "prop", layout = "fr", tie_mode = "thin")
+
+####    END Sushi preference data collected in Kamishima (2003)    ####
+
+
+
 ##########################  END import database  ###############################
+
+
 
 
 
@@ -179,9 +272,6 @@ database$w.true5 <- rep(0, num.free)
 database$w.true5[1] <- 3
 database$Phi.true5 <- compute.Phi.true(num.entities = N, weights = database$w.true5)
 database$Phi.true5 <- round(database$Phi.true5, 2)
-database$M.true5 <- compute.M.true(num.entities = N,
-                                   s = database$s.true5, 
-                                   Phi = database$Phi.true5)
 
 ## Name the rows and columns
 database$artificial5 <- generate.comparisons(num.entities = N, 
@@ -194,10 +284,14 @@ rownames(database$artificial5) <- colnames(database$artificial5) <- database$art
 database$artificial5 <- countsToBinomial(database$artificial5)
 database$artificial5$n_ij <- database$artificial5$win1 + database$artificial5$win2
 database$artificial5$y_ij <- database$artificial5$win1
-database$network.true5 <- plot.network(database$artificial5, draw.flag = FALSE, 
+
+## Draw network
+database$M.true5 <- compute.M.true(num.entities = N,
+                                   s = database$s.true5, 
+                                   Phi = database$Phi.true5)
+database$df.bin5 <- create.bin_df(database$M.true5[,'M'], names = NULL, N)
+database$network.true5 <- plot.network(database$df.bin5, draw.flag = FALSE, 
                                        weight = "prop", layout = "fr", tie_mode = "thin")
-
-
 
 
 ## Generate artificial data for 10 entities
@@ -208,11 +302,13 @@ num.pairs <- ncol(combn(N, 2))
 database$freq.true10 <- rep(30, num.pairs)
 database$s.true10 <- seq(from = 0.5, to = 5, by = 0.5)
 database$s.true10 <- database$s.true10 - mean(database$s.true10)
-database$w.true10 <- rep(0, num.free)
-database$w.true10[1] <- 4
-database$w.true10[6] <- 3
-database$w.true10[12] <-3
-database$Phi.true10 <- compute.Phi.true(num.entities = N, weights = database$w.true10)
+database$Phi.true10 <- rep(0, choose(N,3))
+database$Phi.true10[1] <- 3
+#database$w.true10 <- rep(0, num.free)
+#database$w.true10[1] <- 4
+#database$w.true10[6] <- 3
+#database$w.true10[12] <-3
+#database$Phi.true10 <- compute.Phi.true(num.entities = N, weights = database$w.true10)
 
 ## Name the rows and columns
 database$artificial10 <- generate.comparisons(num.entities = N, 
@@ -235,13 +331,50 @@ database$network.true10 <- plot.network(database$df.bin10, draw.flag = FALSE,
                                         weight = "prop", layout = "fr", tie_mode = "thin")
 
 
+## Generate artificial data for 15 entities
+N <- 15
+num.free <- choose(N-1,2)
+database$artificial.name15 <- paste("Entity", 1:N)
+num.pairs <- ncol(combn(N, 2))
+database$freq.true15 <- rep(30, num.pairs)
+database$s.true15 <- seq(from = 0.5, to = 7.5, by = 0.5)
+database$s.true15 <- database$s.true15 - mean(database$s.true15)
+#database$Phi.true15 <- rep(0, choose(N,3))
+#database$Phi.true15[1] <- 3
+database$w.true15 <- rep(0, num.free)
+database$w.true15[1] <- 4
+database$w.true15[6] <- 3
+database$w.true15[12] <-3
+database$Phi.true15 <- compute.Phi.true(num.entities = N, weights = database$w.true15)
+
+## Name the rows and columns
+database$artificial15 <- generate.comparisons(num.entities = N, 
+                                              freq.vec = database$freq.true15, 
+                                              s = database$s.true15,
+                                              Phi = database$Phi.true15)
+rownames(database$artificial15) <- colnames(database$artificial15) <- database$artificial.name15
+
+## Convert to binomial format
+database$artificial15 <- countsToBinomial(database$artificial15)
+database$artificial15$n_ij <- database$artificial15$win1 + database$artificial15$win2
+database$artificial15$y_ij <- database$artificial15$win1
+
+## Draw network
+database$M.true15 <- compute.M.true(num.entities = N,
+                                    s = database$s.true15, 
+                                    Phi = database$Phi.true15)
+database$df.bin15 <- create.bin_df(database$M.true15[,'M'], names = NULL, N)
+database$network.true15 <- plot.network(database$df.bin15, draw.flag = FALSE, 
+                                        weight = "prop", layout = "fr", tie_mode = "thin")
+
+
 ## Generate artificial data for 30 entities
 N <- 30
 num.free <- choose(N-1,2)
 database$artificial.name30 <- paste("Entity", 1:N)
 num.pairs <- ncol(combn(N, 2))
 database$freq.true30 <- rep(30, num.pairs)
-database$s.true30 <- seq(from = 0.5, to = 25, by = 0.5)
+database$s.true30 <- seq(from = 0.5, to = 15, by = 0.5)
 database$s.true30 <- database$s.true30 - mean(database$s.true30)
 database$w.true30 <- rep(0, num.free)
 database$w.true30[1] <- 4
@@ -268,42 +401,6 @@ database$M.true30 <- compute.M.true(num.entities = N,
                                     Phi = database$Phi.true30)
 database$df.bin30 <- create.bin_df(database$M.true30[,'M'], names = NULL, N)
 database$network.true30 <- plot.network(database$df.bin30, draw.flag = FALSE, 
-                                        weight = "prop", layout = "fr", tie_mode = "thin")
-
-
-## Generate artificial data for 50 entities
-N <- 50
-num.free <- choose(N-1,2)
-database$artificial.name50 <- paste("Entity", 1:N)
-num.pairs <- ncol(combn(N, 2))
-database$freq.true50 <- rep(100, num.pairs)
-database$s.true50 <- seq(from = 0.5, to = 25, by = 0.5)
-database$s.true50 <- database$s.true50 - mean(database$s.true50)
-database$w.true50 <- rep(0, num.free)
-database$w.true50[1] <- 4
-database$w.true50[6] <- 3
-database$w.true50[12] <-3
-database$w.true50[32] <-1
-database$Phi.true50 <- compute.Phi.true(num.entities = N, weights = database$w.true50)
-
-## Name the rows and columns
-database$artificial50 <- generate.comparisons(num.entities = N, 
-                                              freq.vec = database$freq.true50, 
-                                              s = database$s.true50,
-                                              Phi = database$Phi.true50)
-rownames(database$artificial50) <- colnames(database$artificial50) <- database$artificial.name50
-
-## Convert to binomial format
-database$artificial50 <- countsToBinomial(database$artificial50)
-database$artificial50$n_ij <- database$artificial50$win1 + database$artificial50$win2
-database$artificial50$y_ij <- database$artificial50$win1
-
-## Draw network
-database$M.true50 <- compute.M.true(num.entities = N,
-                                    s = database$s.true50, 
-                                    Phi = database$Phi.true50)
-database$df.bin50 <- create.bin_df(database$M.true50[,'M'], names = NULL, N)
-database$network.true50 <- plot.network(database$df.bin50, draw.flag = FALSE, 
                                         weight = "prop", layout = "fr", tie_mode = "thin")
 
 ########################  END artificial database  #############################
