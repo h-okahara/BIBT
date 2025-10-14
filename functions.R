@@ -8,7 +8,6 @@
 # mcmc:         Number of iterations;
 # burn:         Burn-in period;
 # thin:         A thinning interval;
-# varepsilon    A scalar hyperparameter representing the variance of each constraint;
 # s.prior:      A N×1 vector representing the score of each subject;
 # sigma.prior:  A scalar representing variance of score s_t for t=1,...,N;
 # Phi.prior:    A num.triplets×1 vector representing the triangular parameters;
@@ -20,7 +19,7 @@
 ## OUTPUT:
 # A list of MCMC samples for the parameters: omega, s, Phi, lambda, tau, nu, xi.
 
-CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, varepsilon = NULL,
+CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
                       s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL,
                       lambda.prior = NULL, tau.prior = NULL, 
                       nu.prior = NULL, xi.prior = NULL) {
@@ -42,11 +41,9 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, varepsilon = NULL,
   tau    <- if(is.null(tau.prior))  0.01  else tau.prior
   nu     <- if(is.null(nu.prior)) rep(1, num.triplets-num.kernel) else nu.prior
   xi     <- if(is.null(xi.prior)) 1 else xi.prior
-  varepsilon <- if(is.null(varepsilon)) 1e-6 else varepsilon
   
   omega <- rep(0, num.pairs)
   kappa <- X$y_ij - X$n_ij/2
-  #W.vec <- c(tau^2 * lambda^2, rep(varepsilon^2, num.kernel))
   
   ## Indexing maps of pairs (i,j)
   pair.map <- matrix(0, N, N)
@@ -75,16 +72,12 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, varepsilon = NULL,
   sv <- svd(C.ast, nu = 0, nv = num.triplets)
   C.ast.rank <- sum(sv$d > 1e-10) # rank of C.ast
   if(num.free!=C.ast.rank){stop("Number of free basises is not equal to the rank of C.ast")}
-  
-  # A: num.triplets x k basis of ker(C.ast),
-  A <- if (C.ast.rank < num.triplets) sv$v[, (C.ast.rank+1):num.triplets, drop = FALSE] else matrix(0, num.triplets, 0)
-  Prec_kernel <- tcrossprod(A) / varepsilon^2
-  
+
   # H: num.triplets x (num.triplets-k) orthonormal complement
   H <- if (C.ast.rank > 0) sv$v[, 1:C.ast.rank, drop = FALSE] else matrix(0, num.triplets, 0)
-  P <- t(cbind(H, A)) # P = (H,A)^T
-  if(num.kernel!=ncol(A)){stop("Number of kernel basises is not equal to the number of columns of A")}
   if(num.free!=ncol(H)){stop("Number of free basises is not equal to the number of columns of H")}
+  D.ast <- C.ast %*% H
+  D.ast_t <- t(D.ast)
   
   ## Match-up function: M = grad s + curl* \Phi = Gs + C.ast \Phi
   grad.flow <- as.vector(G %*% s)
@@ -92,14 +85,18 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, varepsilon = NULL,
   M.vec <- grad.flow + curl.flow
   
   ## Define matrices for posterior samples
-  mcmc.row <- ((mcmc-burn) - (mcmc-burn) %% thin) / thin
-  s.pos    <- matrix(0, nrow = mcmc.row, ncol = N)
-  Phi.pos  <- matrix(0, nrow = mcmc.row, ncol = num.triplets)
-  lambda.pos  <- matrix(0, nrow = mcmc.row, ncol = num.free)
-  tau.pos  <- matrix(0, nrow = mcmc.row, ncol = 1)
-  nu.pos  <- matrix(0, nrow = mcmc.row, ncol = num.free)
-  xi.pos  <- matrix(0, nrow = mcmc.row, ncol = 1)
-  M.pos    <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
+  mcmc.row  <- ((mcmc-burn) - (mcmc-burn) %% thin) / thin
+  s.pos         <- matrix(0, nrow = mcmc.row, ncol = N)
+  Phi_free.pos  <- matrix(0, nrow = mcmc.row, ncol = num.free)
+  Phi.pos       <- matrix(0, nrow = mcmc.row, ncol = num.triplets)
+  lambda.pos    <- matrix(0, nrow = mcmc.row, ncol = num.free)
+  tau.pos       <- matrix(0, nrow = mcmc.row, ncol = 1)
+  nu.pos        <- matrix(0, nrow = mcmc.row, ncol = num.free)
+  xi.pos        <- matrix(0, nrow = mcmc.row, ncol = 1)
+  
+  grad.pos      <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
+  curl.pos      <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
+  M.pos         <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
   
   sample.idx <- 0
   #=======================   BEGIN MCMC sampling   =============================
@@ -122,18 +119,18 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, varepsilon = NULL,
     
     ## Updating Phi: num.triplets×1 trianguler vector
     H.scaled <- H * rep(1/(tau * lambda), each = num.triplets)
-    Prec_prior <- tcrossprod(H.scaled) + Prec_kernel
-    Prec_likeligood <- crossprod(C.ast, Diagonal(x = omega) %*% C.ast)
-    Prec_Phi <- Prec_prior + Prec_likeligood
+    Prec_likelihood <- D.ast_t %*% (omega * D.ast)
+    Prec_Phi <- Prec_likelihood + crossprod(H.scaled)
     Prec_Phi <- forceSymmetric(Prec_Phi, uplo = "U")
-    U_Phi <- chol(Prec_Phi) 
-    B_Phi <- crossprod(C.ast, kappa - omega * as.vector(G %*% s)) # Prec_Phi μ = B_Phi
-    tmp_Phi <- forwardsolve(t(U_Phi), B_Phi)  # Solve U_Phi^T y = B_Phi
-    mu_Phi <- backsolve(U_Phi, tmp_Phi)       # Solve y = U_Phi μ
-    v_Phi <- rnorm(num.triplets)              # v ~ N(0,I)
-    z_Phi <- backsolve(U_Phi, v_Phi)          # Solve U_Phi z = v, then z ~ N(0, (Prec_Phi)^{-1})
-    Phi <- mu_Phi + z_Phi
-  
+    U_Phi <- chol(Prec_Phi)
+    B_Phi <- D.ast_t %*% (kappa - omega * as.vector(G %*% s))
+    tmp_Phi <- forwardsolve(t(U_Phi), B_Phi)
+    mu_Phi <- backsolve(U_Phi, tmp_Phi)
+    v_Phi <- rnorm(num.free)
+    z_Phi <- backsolve(U_Phi, v_Phi)
+    Phi_free <- mu_Phi + z_Phi
+    Phi <- H %*% Phi_free
+    
     ## Updating lambda: num.free×1 vector
     theta <- as.vector(crossprod(H, Phi))
     b_lambda <- 1/nu + theta^2/(2*tau^2)
@@ -164,19 +161,24 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, varepsilon = NULL,
       sample.idx <- sample.idx + 1
       
       ## Store posterior samples
-      s.pos[sample.idx, ]      <- as.vector(s)
-      Phi.pos[sample.idx, ]    <- as.vector(Phi)
-      lambda.pos[sample.idx, ] <- as.vector(lambda)
-      tau.pos[sample.idx, ]    <- as.vector(tau)
-      nu.pos[sample.idx, ]     <- as.vector(nu)
-      xi.pos[sample.idx, ]     <- as.vector(xi)
-      M.pos[sample.idx, ]      <- as.vector(M.vec)
+      s.pos[sample.idx, ]         <- as.vector(s)
+      Phi_free.pos[sample.idx, ]  <- as.vector(Phi_free)
+      Phi.pos[sample.idx, ]       <- as.vector(Phi)
+      lambda.pos[sample.idx, ]    <- as.vector(lambda)
+      tau.pos[sample.idx, ]       <- as.vector(tau)
+      nu.pos[sample.idx, ]        <- as.vector(nu)
+      xi.pos[sample.idx, ]        <- as.vector(xi)
+      
+      grad.pos[sample.idx,]       <- as.vector(grad.flow)
+      curl.pos[sample.idx,]       <- as.vector(curl.flow)
+      M.pos[sample.idx, ]         <- as.vector(M.vec)
     }
   }
   #=======================   END MCMC sampling   ===============================
   
-  result <- list(s = s.pos, Phi = Phi.pos, lambda = lambda.pos, tau = tau.pos, 
-                 nu = nu.pos, xi = xi.pos, M = M.pos)
+  result <- list(s = s.pos, Phi_free = Phi_free.pos, Phi = Phi.pos, 
+                 lambda = lambda.pos, tau = tau.pos, nu = nu.pos, xi = xi.pos, 
+                 grad = grad.pos, curl = curl.pos, M = M.pos)
   return(result)
 }
 
@@ -197,7 +199,6 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, varepsilon = NULL,
 # mcmc:         Number of iterations;
 # burn:         Burn-in period;
 # thin:         A thinning interval;
-# varepsilon    A scalar hyperparameter representing the variance of each constraint;
 # s.prior:      A N×1 vector representing the score of each subject;
 # sigma.prior:  A scalar representing variance of score s_t for t=1,...,N;
 # Phi.prior:    A num.triplets×1 vector representing the triangular parameters;
@@ -211,7 +212,7 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1, varepsilon = NULL,
 
 run.MCMCs <- function(num.chains = 1, name, num.entities = NULL, 
                       MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
-                      X, mcmc = 10000, burn = 2000, thin = 1, varepsilon = 1e-4,
+                      X, mcmc = 10000, burn = 2000, thin = 1,
                       s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL, 
                       tau.prior = NULL, lambda.prior = NULL, 
                       nu.prior = NULL, xi.prior = NULL) {
@@ -220,7 +221,7 @@ run.MCMCs <- function(num.chains = 1, name, num.entities = NULL,
   ## Run multiple MCMC chains
   chains <- parallel::mclapply(1:num.chains, function(chain.id) {
     set.seed(73 + chain.id)
-    CBT.Gibbs(X, mcmc = mcmc, burn = burn, thin = thin, varepsilon = varepsilon,
+    CBT.Gibbs(X, mcmc = mcmc, burn = burn, thin = thin,
               s.prior = s.prior, sigma.prior = sigma.prior, Phi.prior = Phi.prior, 
               tau.prior = tau.prior, lambda.prior = lambda.prior, 
               nu.prior = nu.prior, xi.prior = xi.prior)
@@ -278,7 +279,7 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
       }
     }
     mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "lambda" || name == "nu") {
+  } else if (name == "Phi_free" || name == "lambda" || name == "nu") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.free <- dim(mcmc.chains[[1]])[2]
     
@@ -402,7 +403,7 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, bin
       }
     }
     mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "lambda" || name == "nu") {
+  } else if (name == "Phi_free" || name == "lambda" || name == "nu") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.free <- dim(mcmc.chains[[1]])[2]
     
@@ -533,7 +534,7 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
       }
     }
     mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "lambda" || name == "nu") {
+  } else if (name == "Phi_free" || name == "lambda" || name == "nu") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.free <- dim(mcmc.chains[[1]])[2]
     
@@ -644,7 +645,7 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
 ## OUTPUT:
 # For each chain, prints a data frame of posterior statistics (mean and median) for each parameter.
 
-stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, 
+stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
                              CI = TRUE, level = 0.95, hpd = TRUE, decimal = 4) {
   if (name == "Phi") {
     for (chain in 1:num.chains) {
@@ -690,7 +691,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
       cat("----------------------------\n")
     }
     return(means)
-  } else if (name == "lambda" || name == "nu") {
+  } else if (name == "Phi_free" || name == "lambda" || name == "nu") {
     for (chain in 1:num.chains) {
       cat("Chain", chain, "\n")
       mcmc <- dim(mcmc.chains[[chain]])[1]
@@ -896,7 +897,7 @@ compute.CIs <- function(num.chains = 1, mcmc.chains, name, num.entities,
       }
       cat("----------------------------\n")
     }
-  } else if (name == "lambda" || name == "nu") {
+  } else if (name == "Phi_free" || name == "lambda" || name == "nu") {
     cat("Credible Intervals for", name, ":\n")
     for (chain in 1:num.chains) {
       cat("Chain", chain, "\n")
@@ -1037,7 +1038,7 @@ mcmc.extract <- function(chains, name, num.entities, rhat = FALSE, ess = FALSE) 
         }
       }
     }
-  } else if (name == "lambda" || name == "nu") {
+  } else if (name == "Phi_free" || name == "lambda" || name == "nu") {
     mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
     
     ## Compute Gelman-Rubin diagnostic (Rhat)
@@ -1126,66 +1127,55 @@ mcmc.extract <- function(chains, name, num.entities, rhat = FALSE, ess = FALSE) 
 
 
 
-###---------------------###
-###    Create.bin_df    ###
-###---------------------###
+###---------------------------###
+###    Plot match networks    ###
+###---------------------------###
 
 ## INPUT:
-# M.vec:        Match-up M_ij arranged in lexicographic order of pairs (i < j);
-# names:        A string representing the name of the parameter;
-# num.entities: Integer: Number of entities.
-
-## OUTPUT:
-# A data.frame with columns compatible with plot.network.
-
-create.bin_df <- function(M.vec, names = NULL, num.entities = NULL) {
-  pairs <- t(combn(num.entities, 2))
-  p <- plogis(M.vec)  # win probability
-  
-  df <- data.frame(
-    player1 = pairs[,1], #if (is.null(names)) pairs[,1] else names[pairs[,1]],
-    player2 = pairs[,2], #if (is.null(names)) pairs[,2] else names[pairs[,2]],
-    win1    = p,
-    win2    = 1-p
-  )
-  return(df)
-}
-
-
-
-
-###--------------------------###
-###    Plot match network    ###
-###--------------------------###
-
-## INPUT:
-# bin_df:     Data frame of pairwise results with at least the columns;
-# edge.label: Logical flag: if TRUE, print edge labels as "w_win-w_lose" on the plot;
-# draw.flag:  Logical flag: if TRUE, plot the graph on the plot;
-# weight:     Character scalar, one of c("diff","prop");
-#             "diff" uses max(win1, win2) - min(win1,win2); "prop" uses max(win1,win2) / min(win1,win2);
-# layout:     Character scalar, one of c("fr","circle");
-#             "fr" = Fruchterman–Reingold; "circle" = circular layout;
-# tie_mode:   Character scalar, one of c("skip","thin");
-#             "skip" drops tied edges; "thin" keeps them.
+# relations:     A matrix or data.frame with columns for 'grad', 'curl', 'M';
+# num.entities: Number of entities (e.g., items and players);
+# components:   A character vector specifying which columns of relations to plot.
+#               Defaults: c("grad", "curl", "M").
+# edge.label:   Logical flag: if TRUE, print edge labels as "w_win-w_lose" on the plot;
+# draw.flag:    Logical flag: if TRUE, plot the graph on the plot;
+# weight:       Character scalar, one of c("diff","prop");
+#               "diff" uses max(win1, win2) - min(win1,win2); "prop" uses max(win1,win2) / min(win1,win2);
+# layout:       Character scalar, one of c("fr","circle");
+#               "fr" = Fruchterman–Reingold; "circle" = circular layout;
+# tie_mode:     Character scalar, one of c("skip","thin");
+#               "skip" drops tied edges; "thin" keeps them.
 
 ##OUTPUT
-# Return value: An directed graph created from bin_df.
+# Draws the specified network graphs and invisibly returns a list containing the graph objects.
+# Return value: An directed graph created from relations.
 
-plot.network <- function(bin_df, edge.label = FALSE, draw.flag = TRUE, 
-                         weight = c("diff", "prop"), layout = c("fr", "circle"), 
-                         tie_mode = c("skip", "thin")) {
+plot.networks <- function(relations, num.entities = NULL, components = c("grad", "curl", "M"), 
+                          edge.label = FALSE, draw.flag = TRUE, weight = c("diff", "prop"), 
+                          layout = c("fr", "circle"), tie_mode = c("skip", "thin")) {
   ## Preparation
+  graph_list <- list()
+  pairs <- t(combn(num.entities, 2))
   weight <- match.arg(weight)
   layout <- match.arg(layout)
   tie_mode <- match.arg(tie_mode)
   
   ## Set up the plotting area
-  par(mfrow = c(1, 1), mar = c(1, 2, 1.5, 1), oma = c(1, 1, 2, 1))
+  par(mfrow = c(1, length(components)), cex.main = 2, mar = c(1, 1, 2.5, 1), oma = c(1, 1, 2, 1))
+  
+  ## Define base graph
+  base.name <- if ("M" %in% colnames(relations)) "M" else components[1]
+  relation_base.vec <- relations[, base.name]
+  p_base <- plogis(relation_base.vec)
+  bin_df_base <- data.frame(
+    player1 = pairs[,1], 
+    player2 = pairs[,2],
+    win1 = p_base, 
+    win2 = 1-p_base
+  )
   
   ## Setting nodes and edges
-  nodes_df <- data.frame(name = sort(unique(c(bin_df$player1, bin_df$player2))))
-  edges_df <- bin_df %>%
+  nodes_df <- data.frame(name = 1:num.entities)
+  edges_df_base <- bin_df_base %>%
     mutate(
       is_tie = (win1 == win2),
       winner = if_else(win1 > win2, player1, player2),
@@ -1193,64 +1183,105 @@ plot.network <- function(bin_df, edge.label = FALSE, draw.flag = TRUE,
       w_win  = pmax(win1, win2),
       w_lose = pmin(win1, win2),
       metric = case_when(
-        weight == "diff"  ~ w_win - w_lose,
-        weight == "prop"  ~ w_win / w_lose
+      weight == "diff"  ~ w_win - w_lose,
+      weight == "prop"  ~ w_win / w_lose
       ),
       label = paste(w_win, w_lose, sep = "-")
     ) 
   if (tie_mode == "skip") {
-    edges_df <- edges_df %>% filter(!is_tie)
+    edges_df_base <- edges_df_base %>% filter(!is_tie)
   }
-  edges_df <- edges_df %>%
+  edges_df_base <- edges_df_base %>%
     select(
-      from = winner,
-      to   = loser,
-      metric,
-      label
+      from = winner, 
+      to = loser
     )
+  g_base <- graph_from_data_frame(vertices = nodes_df, d = edges_df_base, directed = TRUE)
   
-  ## Define graph object
-  g <- graph_from_data_frame(vertices = nodes_df, d = edges_df, directed = TRUE)
-  if (length(unique(E(g)$metric)) > 1) {
-    E(g)$width <- rescale(E(g)$metric, to = c(0.5, 3)) # scaling width of all edges
-  } else {
-    E(g)$width <- 3
-  }
+  ## Fix the coordinate
   layout_coords <- switch(layout,
-                          fr     = layout_with_fr(g),
-                          circle = layout_in_circle(g))
+                          fr     = layout_with_fr(g_base),
+                          circle = layout_in_circle(g_base))
   
-  ## Detect cyclic structures and highlight them
-  scc <- components(g, mode = "strong")
-  memb <- scc$membership
-  csize <- scc$csize
-  eH <- as.integer(head_of(g, E(g)))
-  eT <- as.integer(tail_of(g, E(g)))
-  same_scc <- memb[eH] == memb[eT]
-  scc_gt1  <- csize[memb[eH]] > 1
-  loop_e   <- which_loop(g)
-  on_cycle <- (same_scc & scc_gt1) | loop_e
-  E(g)$color <- rgb(0.2, 0.5, 0.9, 1)
-  E(g)[on_cycle]$color <- rgb(1, 0.1, 0.3, 1)
-  
-  ## Plot network graph
-  if (draw.flag) {
-    plot(g,
-         layout = layout_coords,
-         vertex.size = 10,
-         vertex.color = "grey95",
-         vertex.frame.color = "grey40",
-         vertex.label.color = "grey10",
-         edge.width = E(g)$width,
-         edge.color = E(g)$color,
-         edge.arrow.size = 0.2,
-         edge.curved = 0.1,
-         edge.label = if (edge.label) E(g)$label else NA,
-         edge.label.color = "grey20",
-         main = sprintf("Pairwise Win Network (weight: %s)", weight)
-    ) 
+  ## Draw a network of each component
+  for (comp.name in components) {
+    relation.vec <- relations[, comp.name]
+    
+    # A data.frame with columns compatible with plot.network
+    p <- plogis(relation.vec) # win probability
+    bin_df <- data.frame(
+      player1 = pairs[,1],
+      player2 = pairs[,2],
+      win1    = p,
+      win2    = 1-p
+    )
+    
+    ## Setting edges
+    edges_df <- bin_df %>%
+      mutate(
+        is_tie = (win1 == win2),
+        winner = if_else(win1 > win2, player1, player2),
+        loser  = if_else(win1 > win2, player2, player1),
+        w_win  = pmax(win1, win2),
+        w_lose = pmin(win1, win2),
+        metric = case_when(
+          weight == "diff"  ~ w_win - w_lose,
+          weight == "prop"  ~ w_win / w_lose
+        ),
+        label = paste(round(w_win, 3), round(w_lose, 3), sep = "-")
+      ) 
+    if (tie_mode == "skip") {
+      edges_df <- edges_df %>% filter(!is_tie)
+    }
+    edges_df <- edges_df %>%
+      select(
+        from = winner,
+        to   = loser,
+        metric,
+        label
+      )
+    
+    ## Define graph object
+    g <- graph_from_data_frame(vertices = nodes_df, d = edges_df, directed = TRUE)
+    if (length(unique(E(g)$metric)) > 1) {
+      E(g)$width <- rescale(E(g)$metric, to = c(0.5, 3)) # scaling width of all edges
+    } else {
+      E(g)$width <- 3
+    }
+    
+    ## Detect cyclic structures and highlight them
+    scc <- components(g, mode = "strong")
+    memb <- scc$membership
+    csize <- scc$csize
+    eH <- as.integer(head_of(g, E(g)))
+    eT <- as.integer(tail_of(g, E(g)))
+    same_scc <- memb[eH] == memb[eT]
+    scc_gt1  <- csize[memb[eH]] > 1
+    loop_e   <- which_loop(g)
+    on_cycle <- (same_scc & scc_gt1) | loop_e
+    E(g)$color <- rgb(0.2, 0.5, 0.9, 1)
+    E(g)[on_cycle]$color <- rgb(1, 0.1, 0.3, 1)
+    
+    ## Plot network graph
+    if (draw.flag) {
+      plot(g,
+           layout = layout_coords,
+           vertex.size = 10,
+           vertex.color = "grey95",
+           vertex.frame.color = "grey40",
+           vertex.label.color = "grey10",
+           edge.width = E(g)$width,
+           edge.color = E(g)$color,
+           edge.arrow.size = 0.3,
+           edge.curved = 0.1,
+           edge.label = if (edge.label) E(g)$label else NA,
+           edge.label.color = "grey20",
+           main = sprintf("%s", comp.name)
+      ) 
+    }
+    graph_list[[comp.name]] <- g
   }
-  return(g)
+  return(invisible(graph_list))
 }
 
 
@@ -1367,6 +1398,39 @@ compute.M.true <- function(num.entities = NULL, s = NULL, Phi = NULL) {
 
 
 
+###--------------------------------------------###
+###    Compute Match-up from empirical data    ###
+###--------------------------------------------###
+
+## INPUT:
+# df:         A data frame with columns 'player1', 'player2', 'win1' and 'win2'.
+
+## OUTPUT:
+# A matrix with 'M' columns, ready for plot.networks.
+
+compute.M <- function(df) {
+  ## Preparation
+  entities <- sort(unique(c(as.character(df$player1), as.character(df$player2))))
+  num.entities <- length(entities)
+  pairs <- t(combn(num.entities, 2))
+  num.pairs <- nrow(pairs)
+  entity_map <- setNames(1:num.entities, entities)
+  df$player1 <- entity_map[as.character(df$player1)]
+  df$player2 <- entity_map[as.character(df$player2)]
+  
+  ## Compute M.vec
+  M.vec <- numeric(num.pairs)
+  M.vec <- df %>%
+    mutate(
+      metric = log(win1 / win2)
+    )
+  M.vec <- as.vector(M.vec$metric)
+  return(cbind(M = M.vec))
+}
+
+
+
+
 ###----------------------------###
 ###    generate.comparisons    ###
 ###----------------------------###
@@ -1428,3 +1492,9 @@ generate.comparisons <- function(num.entities = NULL, freq.vec = NULL,
   result[cbind(pairs[,2], pairs[,1])] <- freq.vec - win.freq.vec
   return(result)
 }
+
+
+
+
+
+

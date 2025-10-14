@@ -8,25 +8,27 @@ source("functions.R")
 source("database.R")
 
 ## For real-world data.
-#X <- database$citations8
-#entities.name <- database$name8
-#network.true <- database$network.citations8
-#plot.network(X, weight = "prop", layout = "fr", tie_mode = "thin")
+#X <- database$sushiB
+#entities.name <- database$name.sushiB
+#network.true <- database$network.sushiB
 #N <- length(entities.name)  # number of entities
+#plot.networks(compute.M(X), num.entities = N, components = c("M"),
+#              weight = "prop", layout = "fr", tie_mode = "thin")
 
 ## For artificial data.
 N <- 10
 X <- database[[paste0("artificial", N)]]
 entities.name <- database[[paste0("artificial.name", N)]]
-network.true <- database[[paste0("network.true", N)]]
-plot.network(database[[paste0("df.bin", N)]], weight = "prop", layout = "fr", tie_mode = "thin")
+networks.true <- database[[paste0("networks.true", N)]]
+plot.networks(database[[paste0("M.true", N)]], num.entities = N, components = c("grad", "curl", "M"),
+              weight = "prop", layout = "fr", tie_mode = "thin")
 
 ## Preparation
 triplets <- t(combn(1:N, 3))
 num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
 num.kernel <- ncol(combn(N-1,3))
 num.free <- num.triplets-num.kernel
-num.iter <- 10000
+num.iter <- 30000
 num.burn <- num.iter/2
 
 ######################  END import & setting  ##################################
@@ -76,7 +78,7 @@ isomorphic(network.estimates, network.true)
 
 ## Prior specification
 num.chains <- 1
-param.name <- "lambda"  # Options: (s, Phi, lambda, tau, nu, xi, M)
+param.name <- "s"  # Options: (s, Phi, Phi_free, lambda, tau, nu, xi, M)
 s.prior <- rep(0, N)
 Phi.prior <- rep(0, num.triplets)
 lambda.prior <- rep(1, num.free)
@@ -85,7 +87,7 @@ nu.prior <- rep(1, num.free)
 xi.prior <- 1
 mcmc.results <- run.MCMCs(num.chains = num.chains, name = param.name, num.entities = N,
                           MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
-                          X, mcmc = num.iter, burn = num.burn, thin = 1, varepsilon = 1e-5,
+                          X, mcmc = num.iter, burn = num.burn, thin = 1,
                           s.prior = s.prior, sigma.prior = 1, Phi.prior = Phi.prior, 
                           lambda.prior = lambda.prior, tau.prior = tau.prior,
                           nu.prior = nu.prior, xi.prior = xi.prior)
@@ -100,10 +102,19 @@ plot.ACFs(num.chains, specific.mcmc, param.name, N)        # plot autocorrelatio
 specific.mean <- stats.posteriors(num.chains, specific.mcmc, param.name, N, 
                                   CI = TRUE, level = 0.95, hpd = TRUE, decimal = 3)  # compute the mean, median and sds
 
+## Draw network and check isomorphism
+grad.estimates <- stats.posteriors(num.chains, mcmc.extract(mcmc.results$all.mcmc, "grad", N),
+                                   name = "grad", num.entities =  N, decimal = 3)
+curl.estimates <- stats.posteriors(num.chains, mcmc.extract(mcmc.results$all.mcmc, "curl", N),
+                                   name = "curl", num.entities =  N, decimal = 3)
 M.estimates <- stats.posteriors(num.chains, mcmc.extract(mcmc.results$all.mcmc, "M", N),
                                 name = "M", num.entities =  N, decimal = 3)
-df.estimated <- create.bin_df(M.estimates, names = paste("Entity", 1:N), N)
-network.estimates <- plot.network(df.estimated, weight = "prop", layout = "fr", tie_mode = "thin")
-isomorphic(network.estimates, network.true)
+relations.estimates <- round(cbind(grad.estimates, curl.estimates, M.estimates), 3)
+colnames(relations.estimates) <- c("grad", "curl", "M")
+network.estimates <- plot.networks(relations.estimates, num.entities = N, components = c("grad", "curl", "M"), 
+                                   weight = "prop", layout = "fr", tie_mode = "thin")
+sapply(names(network.estimates), function(comp.name) {
+  isomorphic(network.estimates[[comp.name]], networks.true[[comp.name]])
+})
 
 ############=################  END TDBT.Gibbs  ##################################
