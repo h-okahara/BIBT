@@ -234,12 +234,16 @@ N <- 5
 num.free <- choose(N-1,2)
 database$artificial.name5 <- paste("Entity", 1:N)
 num.pairs <- ncol(combn(N, 2))
-database$freq.true5 <- rep(20, num.pairs)
+database$freq.true5 <- rep(30, num.pairs)
 database$s.true5 <- c(-2,-1,0,1,2)
+#database$w.true5 <- mvrnorm(1, rep(0,num.free), diag(num.free))
 database$w.true5 <- rep(0, num.free)
 database$w.true5[1] <- 3
 database$Phi.true5 <- compute.Phi.true(num.entities = N, weights = database$w.true5)
 database$Phi.true5 <- round(database$Phi.true5, 2)
+database$M.true5 <- compute.relations.true(num.entities = N,
+                                           s = database$s.true5, 
+                                           Phi = database$Phi.true5)
 
 ## Name the rows and columns
 database$artificial5 <- generate.comparisons(num.entities = N, 
@@ -253,12 +257,6 @@ database$artificial5 <- countsToBinomial(database$artificial5)
 database$artificial5$n_ij <- database$artificial5$win1 + database$artificial5$win2
 database$artificial5$y_ij <- database$artificial5$win1
 
-## Draw network
-database$M.true5 <- compute.M.true(num.entities = N,
-                                   s = database$s.true5, 
-                                   Phi = database$Phi.true5)
-database$networks.true5 <- plot.networks(database$M.true5, num.entities = N, components = c("grad", "curl", "M"), 
-                                        draw.flag = FALSE, weight = "prop", layout = "fr", tie_mode = "thin")
 
 
 ## Generate artificial data for 10 entities
@@ -266,16 +264,17 @@ N <- 10
 num.free <- choose(N-1,2)
 database$artificial.name10 <- paste("Entity", 1:N)
 num.pairs <- ncol(combn(N, 2))
-database$freq.true10 <- rep(30, num.pairs)
+database$freq.true10 <- rep(50, num.pairs)
 database$s.true10 <- seq(from = 0.5, to = 5, by = 0.5)
 database$s.true10 <- database$s.true10 - mean(database$s.true10)
-#database$Phi.true10 <- rep(0, choose(N,3))
-#database$Phi.true10[1] <- 3
 database$w.true10 <- rep(0, num.free)
-database$w.true10[1] <- 4
-database$w.true10[6] <- 3
-database$w.true10[12] <-3
+database$w.true10[1] <- 7
+database$w.true10[6] <- 5
+database$w.true10[12] <-6
 database$Phi.true10 <- compute.Phi.true(num.entities = N, weights = database$w.true10)
+database$M.true10 <- compute.relations.true(num.entities = N,
+                                            s = database$s.true10, 
+                                            Phi = database$Phi.true10)
 
 ## Name the rows and columns
 database$artificial10 <- generate.comparisons(num.entities = N, 
@@ -289,12 +288,6 @@ database$artificial10 <- countsToBinomial(database$artificial10)
 database$artificial10$n_ij <- database$artificial10$win1 + database$artificial10$win2
 database$artificial10$y_ij <- database$artificial10$win1
 
-## Draw network
-database$M.true10 <- compute.M.true(num.entities = N,
-                                    s = database$s.true10, 
-                                    Phi = database$Phi.true10)
-database$networks.true10 <- plot.networks(database$M.true10, num.entities = N, components = c("grad", "curl", "M"), 
-                                         draw.flag = FALSE, weight = "prop", layout = "fr", tie_mode = "thin")
 
 
 ## Generate artificial data for 15 entities
@@ -302,16 +295,17 @@ N <- 15
 num.free <- choose(N-1,2)
 database$artificial.name15 <- paste("Entity", 1:N)
 num.pairs <- ncol(combn(N, 2))
-database$freq.true15 <- rep(30, num.pairs)
+database$freq.true15 <- rep(100, num.pairs)
 database$s.true15 <- seq(from = 0.5, to = 7.5, by = 0.5)
 database$s.true15 <- database$s.true15 - mean(database$s.true15)
-#database$Phi.true15 <- rep(0, choose(N,3))
-#database$Phi.true15[1] <- 5
 database$w.true15 <- rep(0, num.free)
 database$w.true15[1] <- 4
 database$w.true15[6] <- 3
 database$w.true15[12] <-3
 database$Phi.true15 <- compute.Phi.true(num.entities = N, weights = database$w.true15)
+database$M.true15 <- compute.relations.true(num.entities = N,
+                                            s = database$s.true15, 
+                                            Phi = database$Phi.true15)
 
 ## Name the rows and columns
 database$artificial15 <- generate.comparisons(num.entities = N, 
@@ -325,12 +319,6 @@ database$artificial15 <- countsToBinomial(database$artificial15)
 database$artificial15$n_ij <- database$artificial15$win1 + database$artificial15$win2
 database$artificial15$y_ij <- database$artificial15$win1
 
-## Draw network
-database$M.true15 <- compute.M.true(num.entities = N,
-                                    s = database$s.true15, 
-                                    Phi = database$Phi.true15)
-database$networks.true15 <- plot.networks(database$M.true15, num.entities = N, components = c("grad", "curl", "M"), 
-                                         draw.flag = FALSE, weight = "prop", layout = "fr", tie_mode = "thin")
 
 
 ## Generate artificial data for 20 entities
@@ -347,6 +335,9 @@ database$w.true20[6] <- 3
 database$w.true20[12] <-3
 database$w.true20[20] <-2.5
 database$Phi.true20 <- compute.Phi.true(num.entities = N, weights = database$w.true20)
+database$M.true20 <- compute.relations.true(num.entities = N,
+                                            s = database$s.true20, 
+                                            Phi = database$Phi.true20)
 
 ## Name the rows and columns
 database$artificial20 <- generate.comparisons(num.entities = N, 
@@ -360,12 +351,6 @@ database$artificial20 <- countsToBinomial(database$artificial20)
 database$artificial20$n_ij <- database$artificial20$win1 + database$artificial20$win2
 database$artificial20$y_ij <- database$artificial20$win1
 
-## Draw network
-database$M.true20 <- compute.M.true(num.entities = N,
-                                    s = database$s.true20, 
-                                    Phi = database$Phi.true20)
-database$networks.true20 <- plot.networks(database$M.true20, num.entities = N, components = c("grad", "curl", "M"), 
-                                         draw.flag = FALSE, weight = "prop", layout = "fr", tie_mode = "thin")
 
 
 ## Generate artificial data for 30 entities
@@ -382,6 +367,9 @@ database$w.true30[6] <- 3
 database$w.true30[12] <-3
 database$w.true30[20] <-2.5
 database$Phi.true30 <- compute.Phi.true(num.entities = N, weights = database$w.true30)
+database$M.true30 <- compute.relations.true(num.entities = N,
+                                            s = database$s.true30, 
+                                            Phi = database$Phi.true30)
 
 ## Name the rows and columns
 database$artificial30 <- generate.comparisons(num.entities = N, 
@@ -395,11 +383,5 @@ database$artificial30 <- countsToBinomial(database$artificial30)
 database$artificial30$n_ij <- database$artificial30$win1 + database$artificial30$win2
 database$artificial30$y_ij <- database$artificial30$win1
 
-## Draw network
-database$M.true30 <- compute.M.true(num.entities = N,
-                                    s = database$s.true30, 
-                                    Phi = database$Phi.true30)
-database$networks.true30 <- plot.networks(database$M.true30, num.entities = N, components = c("grad", "curl", "M"), 
-                                         draw.flag = FALSE, weight = "prop", layout = "fr", tie_mode = "thin")
 
 ########################  END artificial database  #############################

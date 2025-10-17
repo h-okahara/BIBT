@@ -8,28 +8,28 @@ source("functions.R")
 source("database.R")
 
 ## For real-world data.
-#X <- database$sushiB
-#entities.name <- database$name.sushiB
-#network.true <- database$network.sushiB
+#X <- database$citations9
+#entities.name <- database$name9
+#network.true <- database$network.citations9
 #N <- length(entities.name)  # number of entities
-#plot.networks(compute.M(X), num.entities = N, components = c("M"),
-#              weight = "prop", layout = "fr", tie_mode = "thin")
+#networks.true <- plot.networks(compute.M(X), num.entities = N, components = c("M"),
+#                               weight = "prop", layout = "circle", tie_mode = "skip")
 
 ## For artificial data.
 N <- 10
 X <- database[[paste0("artificial", N)]]
 entities.name <- database[[paste0("artificial.name", N)]]
-networks.true <- database[[paste0("networks.true", N)]]
-plot.networks(database[[paste0("M.true", N)]], num.entities = N, components = c("grad", "curl", "M"),
-              weight = "prop", layout = "fr", tie_mode = "thin")
+networks.true <- plot.networks(database[[paste0("M.true", N)]], num.entities = N, 
+                               components = c("grad", "curl", "M"), 
+                               weight = "prop", layout = "circle", tie_mode = "skip")
 
 ## Preparation
 triplets <- t(combn(1:N, 3))
 num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
 num.kernel <- ncol(combn(N-1,3))
 num.free <- num.triplets-num.kernel
-num.iter <- 30000
-num.burn <- num.iter/2
+num.iter <- 10000
+num.burn <- num.iter/5
 
 ######################  END import & setting  ##################################
 
@@ -67,9 +67,12 @@ if (sorting) {
 ## MSE simulationを追加する
 pairs <- t(combn(N, 2))
 M.BT <- citations.qv.sorted$qvframe$estimate[pairs[,1]] - citations.qv.sorted$qvframe$estimate[pairs[,2]]
-df.BT <- create.bin_df(M.BT, N, names = entities.name)
-network.estimates <- plot.network(df.BT, weight = "prop", layout = "fr", tie_mode = "thin")
-isomorphic(network.estimates, network.true)
+relations.BT <- round(cbind(M.BT, M.BT), 3)
+colnames(relations.BT) <- c("grad", "M")
+network.BT <- plot.networks(relations.BT, num.entities = N, components = c("grad", "M"), 
+                            layout.coords = networks.true$layout,
+                            weight = "prop", layout = "circle", tie_mode = "skip")
+plot.reversed_edges(network.BT$graphs, networks.true$graphs, networks.true$layout)
 
 ######################  END BradleyTerry2 package  #############################
 
@@ -78,17 +81,17 @@ isomorphic(network.estimates, network.true)
 
 ## Prior specification
 num.chains <- 1
-param.name <- "s"  # Options: (s, Phi, Phi_free, lambda, tau, nu, xi, M)
+param.name <- "weights"  # Options: (s, weights, Phi, lambda, tau, nu, xi, grad, curl, M)
 s.prior <- rep(0, N)
 Phi.prior <- rep(0, num.triplets)
 lambda.prior <- rep(1, num.free)
-tau.prior <- 1
-nu.prior <- rep(1, num.free)
-xi.prior <- 1
+tau.prior <- 0.5
+nu.prior <- rep(2, num.free)
+xi.prior <- 2
 mcmc.results <- run.MCMCs(num.chains = num.chains, name = param.name, num.entities = N,
                           MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
                           X, mcmc = num.iter, burn = num.burn, thin = 1,
-                          s.prior = s.prior, sigma.prior = 1, Phi.prior = Phi.prior, 
+                          s.prior = s.prior, sigma.prior = 3, Phi.prior = Phi.prior, 
                           lambda.prior = lambda.prior, tau.prior = tau.prior,
                           nu.prior = nu.prior, xi.prior = xi.prior)
 
@@ -99,22 +102,23 @@ specific.mcmc <- mcmc.extract(mcmc.results$all.mcmc, param.name, N, rhat = FALSE
 plot.MCMCs(num.chains, specific.mcmc, param.name, N)       # plot MCMC sample path
 plot.posteriors(num.chains, specific.mcmc, param.name, N)  # plot MCMC histgram
 plot.ACFs(num.chains, specific.mcmc, param.name, N)        # plot autocorrelation function (ACF)
-specific.mean <- stats.posteriors(num.chains, specific.mcmc, param.name, N, 
-                                  CI = TRUE, level = 0.95, hpd = TRUE, decimal = 3)  # compute the mean, median and sds
+specifics.estimates <- stats.posteriors(num.chains, specific.mcmc, param.name, N, 
+                                        CI = TRUE, level = 0.95, hpd = TRUE, decimal = 3)  # compute the mean, median and sds
 
 ## Draw network and check isomorphism
-grad.estimates <- stats.posteriors(num.chains, mcmc.extract(mcmc.results$all.mcmc, "grad", N),
-                                   name = "grad", num.entities =  N, decimal = 3)
-curl.estimates <- stats.posteriors(num.chains, mcmc.extract(mcmc.results$all.mcmc, "curl", N),
-                                   name = "curl", num.entities =  N, decimal = 3)
-M.estimates <- stats.posteriors(num.chains, mcmc.extract(mcmc.results$all.mcmc, "M", N),
-                                name = "M", num.entities =  N, decimal = 3)
-relations.estimates <- round(cbind(grad.estimates, curl.estimates, M.estimates), 3)
-colnames(relations.estimates) <- c("grad", "curl", "M")
-network.estimates <- plot.networks(relations.estimates, num.entities = N, components = c("grad", "curl", "M"), 
-                                   weight = "prop", layout = "fr", tie_mode = "thin")
-sapply(names(network.estimates), function(comp.name) {
-  isomorphic(network.estimates[[comp.name]], networks.true[[comp.name]])
-})
+statistic <- "mean" # "median" 
+components <- c("grad", "curl", "M")
+list.estimates <- lapply(components, function(comp.name) {
+  stats.posteriors(num.chains, mcmc.extract(mcmc.results$all.mcmc, comp.name, N),
+                   name = comp.name, num.entities = N, decimal = 3, silent.flag = TRUE)
+  })
+list.estimates <- lapply(list.estimates, `[[`, statistic)
+relations.estimates <- do.call(cbind, list.estimates)
+colnames(relations.estimates) <- components
+network.estimates <- plot.networks(relations.estimates, num.entities = N,
+                                   components = c("grad", "curl", "M"), 
+                                   layout.coords = networks.true$layout,
+                                   weight = "prop", layout = "circle", tie_mode = "skip")
+plot.reversed_edges(network.estimates$graphs, networks.true$graphs, networks.true$layout)
 
 ############=################  END TDBT.Gibbs  ##################################

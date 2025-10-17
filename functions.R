@@ -27,13 +27,15 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
   entity.name <- unique(c(X[ ,1], X[ ,2]))
   N <- length(entity.name)  # number of entities
   pairs <- t(combn(N, 2))
-  num.pairs <- nrow(pairs)  # number of unique (i,j) pairs
   triplets <- t(combn(1:N, 3))
+  num.pairs <- nrow(pairs)  # number of unique (i,j) pairs
   num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
   num.kernel <- ncol(combn(N-1, 3))
   num.free <- num.triplets-num.kernel
   
   ## Initial values
+  omega <- rep(0, num.pairs)
+  kappa <- X$y_ij - X$n_ij/2
   s      <- if(is.null(s.prior))  rep(0, N) else s.prior
   sigma  <- if(is.null(sigma.prior))  1 else sigma.prior
   Phi    <- if(is.null(Phi.prior))  rep(0, num.triplets)  else Phi.prior
@@ -42,40 +44,12 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
   nu     <- if(is.null(nu.prior)) rep(1, num.triplets-num.kernel) else nu.prior
   xi     <- if(is.null(xi.prior)) 1 else xi.prior
   
-  omega <- rep(0, num.pairs)
-  kappa <- X$y_ij - X$n_ij/2
-  
-  ## Indexing maps of pairs (i,j)
-  pair.map <- matrix(0, N, N)
-  for(idx in 1:num.pairs) {
-    pair.map[pairs[idx,1], pairs[idx,2]] <- idx
-  }
-  
-  ## Build G = grad (num.pairs x N)
-  G_i <- rep(1:num.pairs, 2)        # row indices
-  G_j <- c(pairs[, 1], pairs[, 2])  # column indices
-  G_x <- c(rep(1, num.pairs), rep(-1, num.pairs))
-  G <- sparseMatrix(i = G_i, j = G_j, x = G_x, dims = c(num.pairs, N))
-  
-  ## Build C.ast = curl* (num.pairs x num.triplets)
-  pair.map.vec <- as.vector(pair.map)
-  e_ij <- pair.map.vec[triplets[, 1] + (triplets[, 2] - 1) * N]
-  e_jk <- pair.map.vec[triplets[, 2] + (triplets[, 3] - 1) * N]
-  e_ik <- pair.map.vec[triplets[, 1] + (triplets[, 3] - 1) * N]
-  C_i <- c(e_ij, e_jk, e_ik)  # row indices
-  C_j <- c(1:num.triplets, 1:num.triplets, 1:num.triplets)  # column indices
-  C_x <- c(rep(1, num.triplets), rep(1, num.triplets), rep(-1, num.triplets))
-  C.ast <- sparseMatrix(i = C_i, j = C_j, x = C_x, dims = c(num.pairs, num.triplets))
-  
-  ## Build A (basis of ker(C.ast)), H (orthogonal complement)
-  # Compute SVD of C.ast: C.ast = U D V^T
-  sv <- svd(C.ast, nu = 0, nv = num.triplets)
-  C.ast.rank <- sum(sv$d > 1e-10) # rank of C.ast
-  if(num.free!=C.ast.rank){stop("Number of free basises is not equal to the rank of C.ast")}
-
-  # H: num.triplets x (num.triplets-k) orthonormal complement
-  H <- if (C.ast.rank > 0) sv$v[, 1:C.ast.rank, drop = FALSE] else matrix(0, num.triplets, 0)
-  if(num.free!=ncol(H)){stop("Number of free basises is not equal to the number of columns of H")}
+  ## Build operators
+  operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
+  G <- operators$G  # G = grad (num.pairs x N)
+  C.ast <- operators$C.ast  # C.ast = curl* (num.pairs x num.triplets)
+  H <- operators$H  # column space basis
+  A <- operators$A  # kernel space basis
   D.ast <- C.ast %*% H
   D.ast_t <- t(D.ast)
   
@@ -87,7 +61,7 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
   ## Define matrices for posterior samples
   mcmc.row  <- ((mcmc-burn) - (mcmc-burn) %% thin) / thin
   s.pos         <- matrix(0, nrow = mcmc.row, ncol = N)
-  Phi_free.pos  <- matrix(0, nrow = mcmc.row, ncol = num.free)
+  weights.pos   <- matrix(0, nrow = mcmc.row, ncol = num.free)
   Phi.pos       <- matrix(0, nrow = mcmc.row, ncol = num.triplets)
   lambda.pos    <- matrix(0, nrow = mcmc.row, ncol = num.free)
   tau.pos       <- matrix(0, nrow = mcmc.row, ncol = 1)
@@ -128,8 +102,8 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
     mu_Phi <- backsolve(U_Phi, tmp_Phi)
     v_Phi <- rnorm(num.free)
     z_Phi <- backsolve(U_Phi, v_Phi)
-    Phi_free <- mu_Phi + z_Phi
-    Phi <- H %*% Phi_free
+    weights <- mu_Phi + z_Phi
+    Phi <- H %*% weights
     
     ## Updating lambda: num.free×1 vector
     theta <- as.vector(crossprod(H, Phi))
@@ -162,7 +136,7 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
       
       ## Store posterior samples
       s.pos[sample.idx, ]         <- as.vector(s)
-      Phi_free.pos[sample.idx, ]  <- as.vector(Phi_free)
+      weights.pos[sample.idx, ]   <- as.vector(weights)
       Phi.pos[sample.idx, ]       <- as.vector(Phi)
       lambda.pos[sample.idx, ]    <- as.vector(lambda)
       tau.pos[sample.idx, ]       <- as.vector(tau)
@@ -176,7 +150,7 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
   }
   #=======================   END MCMC sampling   ===============================
   
-  result <- list(s = s.pos, Phi_free = Phi_free.pos, Phi = Phi.pos, 
+  result <- list(s = s.pos, weights = weights.pos, Phi = Phi.pos, 
                  lambda = lambda.pos, tau = tau.pos, nu = nu.pos, xi = xi.pos, 
                  grad = grad.pos, curl = curl.pos, M = M.pos)
   return(result)
@@ -279,7 +253,7 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
       }
     }
     mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "Phi_free" || name == "lambda" || name == "nu") {
+  } else if (name == "weights" || name == "lambda" || name == "nu") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.free <- dim(mcmc.chains[[1]])[2]
     
@@ -403,7 +377,7 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, bin
       }
     }
     mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "Phi_free" || name == "lambda" || name == "nu") {
+  } else if (name == "weights" || name == "lambda" || name == "nu") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.free <- dim(mcmc.chains[[1]])[2]
     
@@ -534,7 +508,7 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
       }
     }
     mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "Phi_free" || name == "lambda" || name == "nu") {
+  } else if (name == "weights" || name == "lambda" || name == "nu") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.free <- dim(mcmc.chains[[1]])[2]
     
@@ -641,15 +615,17 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
 # level:        The credible interval level (e.g., 0.95);
 # hpd:          Logical flag: if TRUE, return the Highest Posterior Density (HPD) interval;
 # decimal:      Number of decimal places.
+# silent.flag:  Logical flag: if FALSE, print the estimated results.
 
 ## OUTPUT:
 # For each chain, prints a data frame of posterior statistics (mean and median) for each parameter.
 
 stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
-                             CI = TRUE, level = 0.95, hpd = TRUE, decimal = 4) {
+                             CI = TRUE, level = 0.95, hpd = TRUE, decimal = 4, 
+                             silent.flag = FALSE) {
   if (name == "Phi") {
     for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
+      if (!silent.flag) cat("Chain", chain, "\n")
       mcmc <- dim(mcmc.chains[[chain]])[1]
       num.triplets <- dim(mcmc.chains[[chain]])[2]
       triplets <- t(combn(1:num.entities, 3))
@@ -687,13 +663,14 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
                           SD       = round(sds, decimal),
                           CI       = if (CI) CI.str else NA_character_, check.names = FALSE
       )
-      print(stats, row.names = FALSE)
-      cat("----------------------------\n")
+      if (!silent.flag) print(stats, row.names = FALSE)
+      if (!silent.flag) cat("----------------------------\n")
     }
-    return(means)
-  } else if (name == "Phi_free" || name == "lambda" || name == "nu") {
+    outputs <- list(mean = round(means, decimal), median = round(medians, decimal))
+    return(outputs)
+  } else if (name == "weights" || name == "lambda" || name == "nu") {
     for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
+      if (!silent.flag) cat("Chain", chain, "\n")
       mcmc <- dim(mcmc.chains[[chain]])[1]
       num.free <- dim(mcmc.chains[[chain]])[2]
       
@@ -726,13 +703,14 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
                           SD       = round(sds, decimal),
                           CI       = if (CI) CI.str else NA_character_, check.names = FALSE
       )
-      print(stats, row.names = FALSE)
-      cat("----------------------------\n")
+      if (!silent.flag) print(stats, row.names = FALSE)
+      if (!silent.flag) cat("----------------------------\n")
     }
-    return(means)
+    outputs <- list(mean = round(means, decimal), median = round(medians, decimal))
+    return(outputs)
   } else if (name == "s") {
     for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
+      if (!silent.flag) cat("Chain", chain, "\n")
       mcmc <- nrow(mcmc.chains[[chain]])
       if(ncol(mcmc.chains[[chain]])!=num.entities){stop("Number of num.entities is not equal to the length of s")}
       
@@ -765,13 +743,14 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
                           SD       = round(sds, decimal),
                           CI       = if (CI) CI.str else NA_character_, check.names = FALSE
       )
-      print(stats, row.names = FALSE)
-      cat("----------------------------\n")
+      if (!silent.flag) print(stats, row.names = FALSE)
+      if (!silent.flag) cat("----------------------------\n")
     }
-    return(means)
+    outputs <- list(mean = round(means, decimal), median = round(medians, decimal))
+    return(outputs)
   } else if (name == "M") {
     for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
+      if (!silent.flag) cat("Chain", chain, "\n")
       mcmc <- nrow(mcmc.chains[[chain]])
       pairs <- t(combn(num.entities, 2))
       num.pairs <- nrow(pairs)
@@ -806,13 +785,14 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
                           SD       = round(sds, decimal),
                           CI       = if (CI) CI.str else NA_character_, check.names = FALSE
       )
-      print(stats, row.names = FALSE)
-      cat("----------------------------\n")
+      if (!silent.flag) print(stats, row.names = FALSE)
+      if (!silent.flag) cat("----------------------------\n")
     }
-    return(means)
+    outputs <- list(mean = round(means, decimal), median = round(medians, decimal))
+    return(outputs)
   } else {
     for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
+      if (!silent.flag) cat("Chain", chain, "\n")
       mcmc <- nrow(mcmc.chains[[chain]])
       
       ## Compute the mean and median
@@ -844,10 +824,11 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
                           SD       = round(sds, decimal),
                           CI       = if (CI) CI.str else NA_character_, check.names = FALSE
       )
-      print(stats, row.names = FALSE)
-      cat("----------------------------\n")
+      if (!silent.flag) print(stats, row.names = FALSE)
+      if (!silent.flag) cat("----------------------------\n")
     }
-    return(means)
+    outputs <- list(mean = round(means, decimal), median = round(medians, decimal))
+    return(outputs)
   }
 }
 
@@ -897,7 +878,7 @@ compute.CIs <- function(num.chains = 1, mcmc.chains, name, num.entities,
       }
       cat("----------------------------\n")
     }
-  } else if (name == "Phi_free" || name == "lambda" || name == "nu") {
+  } else if (name == "weights" || name == "lambda" || name == "nu") {
     cat("Credible Intervals for", name, ":\n")
     for (chain in 1:num.chains) {
       cat("Chain", chain, "\n")
@@ -1038,7 +1019,7 @@ mcmc.extract <- function(chains, name, num.entities, rhat = FALSE, ess = FALSE) 
         }
       }
     }
-  } else if (name == "Phi_free" || name == "lambda" || name == "nu") {
+  } else if (name == "weights" || name == "lambda" || name == "nu") {
     mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
     
     ## Compute Gelman-Rubin diagnostic (Rhat)
@@ -1127,166 +1108,6 @@ mcmc.extract <- function(chains, name, num.entities, rhat = FALSE, ess = FALSE) 
 
 
 
-###---------------------------###
-###    Plot match networks    ###
-###---------------------------###
-
-## INPUT:
-# relations:     A matrix or data.frame with columns for 'grad', 'curl', 'M';
-# num.entities: Number of entities (e.g., items and players);
-# components:   A character vector specifying which columns of relations to plot.
-#               Defaults: c("grad", "curl", "M").
-# edge.label:   Logical flag: if TRUE, print edge labels as "w_win-w_lose" on the plot;
-# draw.flag:    Logical flag: if TRUE, plot the graph on the plot;
-# weight:       Character scalar, one of c("diff","prop");
-#               "diff" uses max(win1, win2) - min(win1,win2); "prop" uses max(win1,win2) / min(win1,win2);
-# layout:       Character scalar, one of c("fr","circle");
-#               "fr" = Fruchterman–Reingold; "circle" = circular layout;
-# tie_mode:     Character scalar, one of c("skip","thin");
-#               "skip" drops tied edges; "thin" keeps them.
-
-##OUTPUT
-# Draws the specified network graphs and invisibly returns a list containing the graph objects.
-# Return value: An directed graph created from relations.
-
-plot.networks <- function(relations, num.entities = NULL, components = c("grad", "curl", "M"), 
-                          edge.label = FALSE, draw.flag = TRUE, weight = c("diff", "prop"), 
-                          layout = c("fr", "circle"), tie_mode = c("skip", "thin")) {
-  ## Preparation
-  graph_list <- list()
-  pairs <- t(combn(num.entities, 2))
-  weight <- match.arg(weight)
-  layout <- match.arg(layout)
-  tie_mode <- match.arg(tie_mode)
-  
-  ## Set up the plotting area
-  par(mfrow = c(1, length(components)), cex.main = 2, mar = c(1, 1, 2.5, 1), oma = c(1, 1, 2, 1))
-  
-  ## Define base graph
-  base.name <- if ("M" %in% colnames(relations)) "M" else components[1]
-  relation_base.vec <- relations[, base.name]
-  p_base <- plogis(relation_base.vec)
-  bin_df_base <- data.frame(
-    player1 = pairs[,1], 
-    player2 = pairs[,2],
-    win1 = p_base, 
-    win2 = 1-p_base
-  )
-  
-  ## Setting nodes and edges
-  nodes_df <- data.frame(name = 1:num.entities)
-  edges_df_base <- bin_df_base %>%
-    mutate(
-      is_tie = (win1 == win2),
-      winner = if_else(win1 > win2, player1, player2),
-      loser  = if_else(win1 > win2, player2, player1),
-      w_win  = pmax(win1, win2),
-      w_lose = pmin(win1, win2),
-      metric = case_when(
-      weight == "diff"  ~ w_win - w_lose,
-      weight == "prop"  ~ w_win / w_lose
-      ),
-      label = paste(w_win, w_lose, sep = "-")
-    ) 
-  if (tie_mode == "skip") {
-    edges_df_base <- edges_df_base %>% filter(!is_tie)
-  }
-  edges_df_base <- edges_df_base %>%
-    select(
-      from = winner, 
-      to = loser
-    )
-  g_base <- graph_from_data_frame(vertices = nodes_df, d = edges_df_base, directed = TRUE)
-  
-  ## Fix the coordinate
-  layout_coords <- switch(layout,
-                          fr     = layout_with_fr(g_base),
-                          circle = layout_in_circle(g_base))
-  
-  ## Draw a network of each component
-  for (comp.name in components) {
-    relation.vec <- relations[, comp.name]
-    
-    # A data.frame with columns compatible with plot.network
-    p <- plogis(relation.vec) # win probability
-    bin_df <- data.frame(
-      player1 = pairs[,1],
-      player2 = pairs[,2],
-      win1    = p,
-      win2    = 1-p
-    )
-    
-    ## Setting edges
-    edges_df <- bin_df %>%
-      mutate(
-        is_tie = (win1 == win2),
-        winner = if_else(win1 > win2, player1, player2),
-        loser  = if_else(win1 > win2, player2, player1),
-        w_win  = pmax(win1, win2),
-        w_lose = pmin(win1, win2),
-        metric = case_when(
-          weight == "diff"  ~ w_win - w_lose,
-          weight == "prop"  ~ w_win / w_lose
-        ),
-        label = paste(round(w_win, 3), round(w_lose, 3), sep = "-")
-      ) 
-    if (tie_mode == "skip") {
-      edges_df <- edges_df %>% filter(!is_tie)
-    }
-    edges_df <- edges_df %>%
-      select(
-        from = winner,
-        to   = loser,
-        metric,
-        label
-      )
-    
-    ## Define graph object
-    g <- graph_from_data_frame(vertices = nodes_df, d = edges_df, directed = TRUE)
-    if (length(unique(E(g)$metric)) > 1) {
-      E(g)$width <- rescale(E(g)$metric, to = c(0.5, 3)) # scaling width of all edges
-    } else {
-      E(g)$width <- 3
-    }
-    
-    ## Detect cyclic structures and highlight them
-    scc <- components(g, mode = "strong")
-    memb <- scc$membership
-    csize <- scc$csize
-    eH <- as.integer(head_of(g, E(g)))
-    eT <- as.integer(tail_of(g, E(g)))
-    same_scc <- memb[eH] == memb[eT]
-    scc_gt1  <- csize[memb[eH]] > 1
-    loop_e   <- which_loop(g)
-    on_cycle <- (same_scc & scc_gt1) | loop_e
-    E(g)$color <- rgb(0.2, 0.5, 0.9, 1)
-    E(g)[on_cycle]$color <- rgb(1, 0.1, 0.3, 1)
-    
-    ## Plot network graph
-    if (draw.flag) {
-      plot(g,
-           layout = layout_coords,
-           vertex.size = 10,
-           vertex.color = "grey95",
-           vertex.frame.color = "grey40",
-           vertex.label.color = "grey10",
-           edge.width = E(g)$width,
-           edge.color = E(g)$color,
-           edge.arrow.size = 0.3,
-           edge.curved = 0.1,
-           edge.label = if (edge.label) E(g)$label else NA,
-           edge.label.color = "grey20",
-           main = sprintf("%s", comp.name)
-      ) 
-    }
-    graph_list[[comp.name]] <- g
-  }
-  return(invisible(graph_list))
-}
-
-
-
-
 ###------------------------###
 ###    Compute Phi.true    ###
 ###------------------------###
@@ -1306,37 +1127,11 @@ compute.Phi.true <- function(num.entities = NULL, weights = NULL) {
   num.triplets <- nrow(triplets)
   if(num.triplets!=nrow(triplets)){stop("Number of triplets given len(s) is not equal to the length of Phi")}
   
-  ## Indexing maps of pairs (i,j)
-  pair.map <- matrix(0, N, N)
-  for(idx in 1:num.pairs) {
-    pair.map[pairs[idx,1], pairs[idx,2]] <- idx
-  }
-  
-  ## Build G = grad (num.pairs x N)
-  G_i <- rep(1:num.pairs, 2)        # row indices
-  G_j <- c(pairs[, 1], pairs[, 2])  # column indices
-  G_x <- c(rep(1, num.pairs), rep(-1, num.pairs))
-  G <- sparseMatrix(i = G_i, j = G_j, x = G_x, dims = c(num.pairs, N))
-  
-  ## Build C.ast = curl* (num.pairs x num.triplets)
-  pair.map.vec <- as.vector(pair.map)
-  e_ij <- pair.map.vec[triplets[, 1] + (triplets[, 2] - 1) * N]
-  e_jk <- pair.map.vec[triplets[, 2] + (triplets[, 3] - 1) * N]
-  e_ik <- pair.map.vec[triplets[, 1] + (triplets[, 3] - 1) * N]
-  C_i <- c(e_ij, e_jk, e_ik)  # row indices
-  C_j <- c(1:num.triplets, 1:num.triplets, 1:num.triplets)  # column indices
-  C_x <- c(rep(1, num.triplets), rep(1, num.triplets), rep(-1, num.triplets))
-  C.ast <- sparseMatrix(i = C_i, j = C_j, x = C_x, dims = c(num.pairs, num.triplets))
-  
-  ## Build A (basis of ker(C.ast)), H (orthogonal complement)
-  # Compute SVD of C.ast: C.ast = U D V^T
-  sv <- svd(C.ast, nu = 0, nv = num.triplets)
-  C.ast.rank <- sum(sv$d > 1e-10) # rank of C.ast
-  if(num.free!=C.ast.rank){stop("Number of free basises is not equal to the rank of C.ast")}
-
-  # H: num.triplets x (num.triplets-k) orthonormal complement
-  H <- if (C.ast.rank > 0) sv$v[, 1:C.ast.rank, drop = FALSE] else matrix(0, num.triplets, 0)
-  
+  ## Build operators
+  operators <- build.hodge_operators(num.entities = num.entities, tol = 1e-10)
+  G <- operators$G  # G = grad (num.pairs x N)
+  C.ast <- operators$C.ast  # C.ast = curl* (num.pairs x num.triplets)
+  H <- operators$H  # column space basis
   return(H %*% weights)
 }
 
@@ -1356,7 +1151,7 @@ compute.Phi.true <- function(num.entities = NULL, weights = NULL) {
 ## OUTPUT:
 # Returns An num.entities × num.entities integer matrix of simulated win counts.
 
-compute.M.true <- function(num.entities = NULL, s = NULL, Phi = NULL) {
+compute.relations.true <- function(num.entities = NULL, s = NULL, Phi = NULL) {
   ## Preparation
   pairs <- t(combn(num.entities, 2))
   num.pairs <- nrow(pairs)
@@ -1364,35 +1159,19 @@ compute.M.true <- function(num.entities = NULL, s = NULL, Phi = NULL) {
   triplets <- t(combn(num.entities, 3))
   if(num.triplets!=nrow(triplets)){stop("Number of triplets given len(s) is not equal to the length of Phi")}
   
-  ## Indexing maps of pairs (i,j)
-  pair.map <- matrix(0, N, N)
-  for(idx in 1:num.pairs) {
-    pair.map[pairs[idx,1], pairs[idx,2]] <- idx
-  }
-  
-  ## Build G = grad (num.pairs x N)
-  G_i <- rep(1:num.pairs, 2)        # row indices
-  G_j <- c(pairs[, 1], pairs[, 2])  # column indices
-  G_x <- c(rep(1, num.pairs), rep(-1, num.pairs))
-  G <- sparseMatrix(i = G_i, j = G_j, x = G_x, dims = c(num.pairs, N))
-  
-  ## Build C.ast = curl* (num.pairs x num.triplets)
-  pair.map.vec <- as.vector(pair.map)
-  e_ij <- pair.map.vec[triplets[, 1] + (triplets[, 2] - 1) * N]
-  e_jk <- pair.map.vec[triplets[, 2] + (triplets[, 3] - 1) * N]
-  e_ik <- pair.map.vec[triplets[, 1] + (triplets[, 3] - 1) * N]
-  C_i <- c(e_ij, e_jk, e_ik)  # row indices
-  C_j <- c(1:num.triplets, 1:num.triplets, 1:num.triplets)  # column indices
-  C_x <- c(rep(1, num.triplets), rep(1, num.triplets), rep(-1, num.triplets))
-  C.ast <- sparseMatrix(i = C_i, j = C_j, x = C_x, dims = c(num.pairs, num.triplets))
+  ## Build operators
+  operators <- build.hodge_operators(num.entities = num.entities, tol = 1e-10)
+  G <- operators$G  # G = grad (num.pairs x N)
+  C.ast <- operators$C.ast  # C.ast = curl* (num.pairs x num.triplets)
   
   ## Match-up function: M = grad s + curl* \Phi = Gs + C.ast \Phi
   grad.true <- as.vector(G %*% s)
   curl.true <- as.vector(C.ast %*% Phi)
   M.true <- grad.true + curl.true
-  result <- round(cbind(grad.true, curl.true, M.true), 3)
-  colnames(result) <- c("grad", "curl", "M")
-  return(result)
+  
+  outputs <- round(cbind(grad.true, curl.true, M.true), 3)
+  colnames(outputs) <- c("grad", "curl", "M")
+  return(outputs)
 }
 
 
@@ -1403,7 +1182,7 @@ compute.M.true <- function(num.entities = NULL, s = NULL, Phi = NULL) {
 ###--------------------------------------------###
 
 ## INPUT:
-# df:         A data frame with columns 'player1', 'player2', 'win1' and 'win2'.
+# df: A data frame with columns 'player1', 'player2', 'win1' and 'win2'.
 
 ## OUTPUT:
 # A matrix with 'M' columns, ready for plot.networks.
@@ -1443,7 +1222,7 @@ compute.M <- function(df) {
 # seed:         Integer: Random seed for reproducibility.
 
 ## OUTPUT:
-# Returns An num.entities × num.entities integer matrix of simulated win counts.
+# An num.entities × num.entities integer matrix of simulated win counts.
 
 generate.comparisons <- function(num.entities = NULL, freq.vec = NULL, 
                                  s = NULL, Phi = NULL, seed = 73) {
@@ -1458,27 +1237,10 @@ generate.comparisons <- function(num.entities = NULL, freq.vec = NULL,
   result <- matrix(NA_integer_, nrow = num.entities, ncol = num.entities)
   rownames(result) <- colnames(result) <- paste0("Entity", 1:num.entities)
   
-  ## Indexing maps of pairs (i,j)
-  pair.map <- matrix(0, N, N)
-  for(idx in 1:num.pairs) {
-    pair.map[pairs[idx,1], pairs[idx,2]] <- idx
-  }
-  
-  ## Build G = grad (num.pairs x N)
-  G_i <- rep(1:num.pairs, 2)        # row indices
-  G_j <- c(pairs[, 1], pairs[, 2])  # column indices
-  G_x <- c(rep(1, num.pairs), rep(-1, num.pairs))
-  G <- sparseMatrix(i = G_i, j = G_j, x = G_x, dims = c(num.pairs, N))
-  
-  ## Build C.ast = curl* (num.pairs x num.triplets)
-  pair.map.vec <- as.vector(pair.map)
-  e_ij <- pair.map.vec[triplets[, 1] + (triplets[, 2] - 1) * N]
-  e_jk <- pair.map.vec[triplets[, 2] + (triplets[, 3] - 1) * N]
-  e_ik <- pair.map.vec[triplets[, 1] + (triplets[, 3] - 1) * N]
-  C_i <- c(e_ij, e_jk, e_ik)  # row indices
-  C_j <- c(1:num.triplets, 1:num.triplets, 1:num.triplets)  # column indices
-  C_x <- c(rep(1, num.triplets), rep(1, num.triplets), rep(-1, num.triplets))
-  C.ast <- sparseMatrix(i = C_i, j = C_j, x = C_x, dims = c(num.pairs, num.triplets))
+  ## Build operators
+  operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
+  G <- operators$G  # G = grad (num.pairs x N)
+  C.ast <- operators$C.ast  # C.ast = curl* (num.pairs x num.triplets)
   
   ## Match-up function: M = grad s + curl* \Phi = Gs + C.ast \Phi
   grad.flow <- as.vector(G %*% s)
@@ -1496,5 +1258,297 @@ generate.comparisons <- function(num.entities = NULL, freq.vec = NULL,
 
 
 
+###---------------------------###
+###    Plot match networks    ###
+###---------------------------###
+
+## INPUT:
+# relations:      A matrix or data.frame with columns for 'grad', 'curl', 'M';
+# num.entities:   Number of entities (e.g., items and players);
+# components:     A character vector specifying which columns of relations to plot.
+#                 Defaults: c("grad", "curl", "M").
+# edge.label:     Logical flag: if TRUE, print edge labels as "w_win-w_lose" on the plot;
+# draw.flag:      Logical flag: if TRUE, plot the graph on the plot;
+# layout.coords:  A matrix of coordinates for the graph layout;
+# weight:         Character scalar, one of c("diff","prop");
+#                 "diff" uses max(win1, win2) - min(win1,win2); "prop" uses max(win1,win2) / min(win1,win2);
+# layout:         Character scalar, one of c("fr","circle");
+#                 "fr" = Fruchterman–Reingold; "circle" = circular layout;
+# tie_mode:       Character scalar, one of c("skip","thin");
+#                 "skip" drops tied edges; "thin" keeps them.
+
+##OUTPUT
+# Draws the specified network graphs and invisibly returns a list containing the graph objects.
+# Return value: An directed graph created from relations.
+
+plot.networks <- function(relations, num.entities = NULL, components = c("grad", "curl", "M"), 
+                          edge.label = FALSE, draw.flag = TRUE, layout.coords = NULL,
+                          weight = c("diff", "prop"), layout = c("fr", "circle"), tie_mode = c("skip", "thin")) 
+  {
+  ## Preparation
+  graph.list <- list()
+  pairs <- t(combn(num.entities, 2))
+  weight <- match.arg(weight)
+  layout <- match.arg(layout)
+  tie_mode <- match.arg(tie_mode)
+  
+  ## Set up the plotting area
+  par(mfrow = c(1, length(components)), cex.main = 2, mar = c(1, 1, 2.5, 1), oma = c(1, 1, 2, 1))
+  
+  
+  if (is.null(layout.coords)) {
+    ## Define base graph
+    base.name <- if ("M" %in% colnames(relations)) "M" else components[1]
+    relation_base.vec <- relations[, base.name]
+    p_base <- plogis(relation_base.vec)
+    bin_df_base <- data.frame(
+      player1 = pairs[,1], 
+      player2 = pairs[,2],
+      win1 = p_base,
+      win2 = 1-p_base
+    )
+    
+    nodes_df_base <- data.frame(name = 1:num.entities)
+    edges_df_base <- bin_df_base %>%
+      mutate(
+        winner = if_else(win1 > win2, player1, player2),
+        loser  = if_else(win1 > win2, player2, player1)
+      ) %>%
+      select(from = winner, to = loser)
+    g_base <- graph_from_data_frame(vertices = nodes_df_base, d = edges_df_base, directed = TRUE)
+    
+    ## Calculate and fix the coordinate
+    layout.coords <- switch(layout,
+                            fr     = layout_with_fr(g_base),
+                            circle = layout_in_circle(g_base))
+  } else {
+    if (!is.matrix(layout.coords) || nrow(layout.coords) != num.entities) {
+      stop("Provided 'layout.coords' must be a matrix with a row for each entity.")
+    }
+  }
+  
+  nodes_df <- data.frame(name = 1:num.entities)
+  
+  ## Draw a network of each component
+  for (comp.name in components) {
+    relation.vec <- relations[, comp.name]
+    
+    # A data.frame with columns compatible with plot.network
+    p <- plogis(relation.vec) # win probability
+    bin_df <- data.frame(
+      player1 = pairs[,1],
+      player2 = pairs[,2],
+      win1    = p,
+      win2    = 1-p
+    )
+    
+    ## Setting edges
+    edges_df <- bin_df %>%
+      mutate(
+        is_tie = (win1 == win2),
+        winner = if_else(win1 > win2, player1, player2),
+        loser  = if_else(win1 > win2, player2, player1),
+        w_win  = pmax(win1, win2),
+        w_lose = pmin(win1, win2),
+        metric = case_when(
+          weight == "diff"  ~ w_win - w_lose,
+          weight == "prop"  ~ w_win / w_lose
+        ),
+        label = paste(round(w_win, 3), round(w_lose, 3), sep = "-")
+      ) 
+    if (tie_mode == "skip") {
+      edges_df <- edges_df %>% filter(!is_tie)
+    }
+    edges_df <- edges_df %>% select(from = winner, to = loser, metric, label)
+    
+    ## Define graph object
+    g <- graph_from_data_frame(vertices = nodes_df, d = edges_df, directed = TRUE)
+    if (length(unique(E(g)$metric)) > 1) {
+      E(g)$width <- rescale(E(g)$metric, to = c(0.5, 3)) # scaling width of all edges
+    } else {
+      E(g)$width <- 3
+    }
+    
+    ## Detect cyclic structures and highlight them
+    scc <- components(g, mode = "strong")
+    memb <- scc$membership
+    csize <- scc$csize
+    eH <- as.integer(head_of(g, E(g)))
+    eT <- as.integer(tail_of(g, E(g)))
+    same_scc <- memb[eH] == memb[eT]
+    scc_gt1  <- csize[memb[eH]] > 1
+    loop_e   <- which_loop(g)
+    on_cycle <- (same_scc & scc_gt1) | loop_e
+    E(g)$color <- rgb(0.2, 0.5, 0.9, 1)
+    E(g)[on_cycle]$color <- rgb(1, 0.1, 0.3, 1)
+    
+    ## Plot network graph
+    if (draw.flag) {
+      plot(g,
+           layout = layout.coords,
+           vertex.size = 10,
+           vertex.color = "grey95",
+           vertex.frame.color = "grey40",
+           vertex.label.color = "grey10",
+           edge.width = E(g)$width,
+           edge.color = E(g)$color,
+           edge.arrow.size = 0.3,
+           edge.curved = 0.1,
+           edge.label = if (edge.label) E(g)$label else NA,
+           edge.label.color = "grey20",
+           main = sprintf("%s", comp.name)
+      ) 
+    }
+    graph.list[[comp.name]] <- g
+  }
+  
+  output <- list(graphs = graph.list, layout = layout.coords)
+  return(invisible(output))
+}
 
 
+
+###---------------------------###
+###    Plot Reversed Edges    ###
+###---------------------------###
+
+## INPUT:
+# graphs.estimated: A named list of the estimated igraph objects;
+# graphs.true:      A named list of the true igraph objects;
+# layout.coords:    A matrix of coordinates to ensure fixed node positions.
+
+## OUTPUT:
+# Plots the reversed edges for non-identical graphs.
+
+plot.reversed_edges <- function(graphs.estimated, graphs.true, layout.coords) {
+  ## Helper function to check if two graphs are identical
+  are_graphs_identical <- function(g1, g2) {
+    el1 <- as_edgelist(g1, names = FALSE)
+    el1_sorted <- el1[order(el1[, 1], el1[, 2]), , drop = FALSE]
+    el2 <- as_edgelist(g2, names = FALSE)
+    el2_sorted <- el2[order(el2[, 1], el2[, 2]), , drop = FALSE]
+    return(identical(el1_sorted, el2_sorted))
+  }
+  
+  ## Compute differences for each component
+  common_components <- intersect(names(graphs.estimated), names(graphs.true))
+  diff_data <- sapply(common_components, function(comp.name) {
+    g.estimate <- graphs.estimated[[comp.name]]
+    g.true     <- graphs.true[[comp.name]]
+
+    if (are_graphs_identical(g.estimate, g.true)) {
+      return(list(identical = TRUE))
+    } else {
+      reversed <- as_edgelist(difference(g.estimate, g.true), names = FALSE)
+      return(list(identical = FALSE, reversed_edges = reversed))
+    }
+  }, simplify = FALSE)
+  
+  ## Filter for components that have differences
+  diff_components <- names(Filter(function(x) !x$identical, diff_data))
+  if (length(diff_components) == 0) {
+    message("All graphs are identical.")
+    return(invisible(diff_data))
+  }
+  
+  ## Set up plotting area and plot the differences
+  par(mfrow = c(1, length(diff_components)), cex.main = 1.5, mar = c(1, 1, 2, 1))
+  
+  for (comp.name in diff_components) {
+    g.true <- graphs.true[[comp.name]]
+    reversed_edges <- diff_data[[comp.name]]$reversed_edges
+    
+    # Plot the true graph as a grey background
+    plot(g.true, 
+         layout = layout.coords,
+         vertex.size = 0,
+         vertex.label = NA,
+         edge.color = "grey80",
+         edge.arrow.size = 0.3,
+         edge.label = NA,
+         main = sprintf("%s", comp.name)
+    )
+    
+    # Overlay the reversed edges in orange
+    if (nrow(reversed_edges) > 0) {
+      all_nodes_df <- data.frame(name = V(g.true)$name)
+      reversed_graph <- graph_from_data_frame(d = as.data.frame(reversed_edges),
+                                              vertices = all_nodes_df, 
+                                              directed = TRUE
+                                              )
+      plot(reversed_graph,
+           add = TRUE, 
+           layout = layout.coords,
+           vertex.size = 10,
+           vertex.color = "grey95",
+           vertex.frame.color = "grey40",
+           vertex.label.color = "grey10",
+           edge.color = "orange",
+           edge.width = 3,
+           edge.arrow.size = 0.6
+      )
+    }
+  }
+  return(invisible(diff_data))
+}
+
+
+
+
+
+###----------------------------------------------------###
+###    Build Hodge operators for the complete graph    ###
+###----------------------------------------------------###
+
+## INPUT:
+# num.entities: Number of entities (e.g., items and players);
+# tol:          Numeric. A small tolerance value to determine the rank of C.ast
+
+## OUTPUT:
+# Returns A list containing the following sparse matrices and basis matrices:
+# G:      A sparse matrix of the gradient operator 'grad';
+# C.ast:  A sparse matrix of the curl adjoint operator 'curl*;
+# H:      A matrix whose columns form an orthonormal basis for the curl space;
+# A:      A matrix whose columns form an orthonormal basis for the kernel of C.ast.
+
+build.hodge_operators <- function(num.entities = NULL, tol = 1e-10) {
+  ## Preparation
+  pairs <- t(combn(num.entities, 2))
+  triplets <- t(combn(num.entities, 3))
+  num.pairs <- nrow(pairs)
+  num.triplets <- nrow(triplets)
+  
+  ## Indexing maps of pairs (i,j)
+  pair.map <- matrix(0, num.entities, num.entities)
+  for(idx in 1:num.pairs) {
+    pair.map[pairs[idx,1], pairs[idx,2]] <- idx
+  }
+
+  ## Build G = grad (num.pairs x N)
+  G_i <- rep(1:num.pairs, 2)        # row indices
+  G_j <- c(pairs[, 1], pairs[, 2])  # column indices
+  G_x <- c(rep(1, num.pairs), rep(-1, num.pairs))
+  G <- sparseMatrix(i = G_i, j = G_j, x = G_x, dims = c(num.pairs, num.entities))
+  
+  ## Build C.ast = curl* (num.pairs x num.triplets)
+  pair.map.vec <- as.vector(pair.map)
+  e_ij <- pair.map.vec[triplets[, 1] + (triplets[, 2] - 1) * num.entities]
+  e_jk <- pair.map.vec[triplets[, 2] + (triplets[, 3] - 1) * num.entities]
+  e_ik <- pair.map.vec[triplets[, 1] + (triplets[, 3] - 1) * num.entities]
+  C_i <- c(e_ij, e_jk, e_ik)  # row indices
+  C_j <- c(1:num.triplets, 1:num.triplets, 1:num.triplets)  # column indices
+  C_x <- c(rep(1, num.triplets), rep(1, num.triplets), rep(-1, num.triplets))
+  C.ast <- sparseMatrix(i = C_i, j = C_j, x = C_x, dims = c(num.pairs, num.triplets))
+  
+  ## Compute Column-space basis H (Largest Magnitude)
+  C.ast.rank <- choose(num.entities-1,2)  # rank of C.ast
+  svd_H <- svds(C.ast, k = C.ast.rank, which = "LM", nu = 0)
+  H <- svd_H$v
+  
+  ## Compute Null-space basis A (Smallest Magnitude)
+  svd_A <- svds(C.ast, k = nrow(C.ast) - C.ast.rank, which = "SM", nu = 0)
+  A <- svd_A$v
+  
+  outputs <- list(G = G, C.ast = C.ast, A = A, H = H)
+  return(outputs)
+}
