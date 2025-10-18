@@ -384,4 +384,36 @@ database$artificial30$n_ij <- database$artificial30$win1 + database$artificial30
 database$artificial30$y_ij <- database$artificial30$win1
 
 
+
+## Generate artificial data for 50 entities
+N <- 50
+num.free <- choose(N-1,2)
+database$artificial.name50 <- paste("Entity", 1:N)
+num.pairs <- ncol(combn(N, 2))
+database$freq.true50 <- rep(50, num.pairs)
+database$s.true50 <- seq(from = 0.5, to = 25, by = 0.5)
+database$s.true50 <- database$s.true50 - mean(database$s.true50)
+database$w.true50 <- rep(0, num.free)
+database$w.true50[1] <- 4
+database$w.true50[6] <- 3
+database$w.true50[12] <-3
+database$w.true50[20] <-2.5
+database$w.true50[30] <-4
+database$Phi.true50 <- compute.Phi.true(num.entities = N, weights = database$w.true50)
+database$M.true50 <- compute.relations.true(num.entities = N,
+                                            s = database$s.true50, 
+                                            Phi = database$Phi.true50)
+
+## Name the rows and columns
+database$artificial50 <- generate.comparisons(num.entities = N, 
+                                              freq.vec = database$freq.true50, 
+                                              s = database$s.true50,
+                                              Phi = database$Phi.true50)
+rownames(database$artificial50) <- colnames(database$artificial50) <- database$artificial.name50
+
+## Convert to binomial format
+database$artificial50 <- countsToBinomial(database$artificial50)
+database$artificial50$n_ij <- database$artificial50$win1 + database$artificial50$win2
+database$artificial50$y_ij <- database$artificial50$win1
+
 ########################  END artificial database  #############################

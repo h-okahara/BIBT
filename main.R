@@ -16,7 +16,7 @@ source("database.R")
 #                               weight = "prop", layout = "circle", tie_mode = "skip")
 
 ## For artificial data.
-N <- 10
+N <- 30
 X <- database[[paste0("artificial", N)]]
 entities.name <- database[[paste0("artificial.name", N)]]
 networks.true <- plot.networks(database[[paste0("M.true", N)]], num.entities = N, 

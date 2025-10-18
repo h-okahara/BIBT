@@ -30,8 +30,7 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
   triplets <- t(combn(1:N, 3))
   num.pairs <- nrow(pairs)  # number of unique (i,j) pairs
   num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
-  num.kernel <- ncol(combn(N-1, 3))
-  num.free <- num.triplets-num.kernel
+  num.free <- choose(N-1,2)
   
   ## Initial values
   omega <- rep(0, num.pairs)
@@ -39,9 +38,9 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
   s      <- if(is.null(s.prior))  rep(0, N) else s.prior
   sigma  <- if(is.null(sigma.prior))  1 else sigma.prior
   Phi    <- if(is.null(Phi.prior))  rep(0, num.triplets)  else Phi.prior
-  lambda <- if(is.null(lambda.prior)) rep(0.01, num.triplets-num.kernel) else lambda.prior
-  tau    <- if(is.null(tau.prior))  0.01  else tau.prior
-  nu     <- if(is.null(nu.prior)) rep(1, num.triplets-num.kernel) else nu.prior
+  lambda <- if(is.null(lambda.prior)) rep(1, num.free) else lambda.prior
+  tau    <- if(is.null(tau.prior))  1  else tau.prior
+  nu     <- if(is.null(nu.prior)) rep(1, num.free) else nu.prior
   xi     <- if(is.null(xi.prior)) 1 else xi.prior
   
   ## Build operators
@@ -49,7 +48,7 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
   G <- operators$G  # G = grad (num.pairs x N)
   C.ast <- operators$C.ast  # C.ast = curl* (num.pairs x num.triplets)
   H <- operators$H  # column space basis
-  A <- operators$A  # kernel space basis
+  #A <- operators$A  # kernel space basis
   D.ast <- C.ast %*% H
   D.ast_t <- t(D.ast)
   
@@ -91,28 +90,26 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
     s <- mu_s + z_s
     s <- s - mean(s)  # Identification
     
-    ## Updating Phi: num.triplets×1 trianguler vector
-    H.scaled <- H * rep(1/(tau * lambda), each = num.triplets)
+    ## Updating w: num.free × 1 weight vector
     Prec_likelihood <- D.ast_t %*% (omega * D.ast)
-    Prec_Phi <- Prec_likelihood + crossprod(H.scaled)
-    Prec_Phi <- forceSymmetric(Prec_Phi, uplo = "U")
-    U_Phi <- chol(Prec_Phi)
-    B_Phi <- D.ast_t %*% (kappa - omega * as.vector(G %*% s))
-    tmp_Phi <- forwardsolve(t(U_Phi), B_Phi)
-    mu_Phi <- backsolve(U_Phi, tmp_Phi)
-    v_Phi <- rnorm(num.free)
-    z_Phi <- backsolve(U_Phi, v_Phi)
-    weights <- mu_Phi + z_Phi
+    Prec_w <- Prec_likelihood + Diagonal(x=1/(tau*lambda)^2)
+    Prec_w <- forceSymmetric(Prec_w, uplo = "U")
+    U_w <- chol(Prec_w)
+    B_w <- D.ast_t %*% (kappa - omega * as.vector(G %*% s))
+    tmp_w <- forwardsolve(t(U_w), B_w)
+    mu_w <- backsolve(U_w, tmp_w)
+    v_w <- rnorm(num.free)
+    z_w <- backsolve(U_w, v_w)
+    weights <- mu_w + z_w
     Phi <- H %*% weights
     
     ## Updating lambda: num.free×1 vector
-    theta <- as.vector(crossprod(H, Phi))
-    b_lambda <- 1/nu + theta^2/(2*tau^2)
+    b_lambda <- 1/nu + weights^2/(2*tau^2)
     lambda <- sqrt(1/rgamma(num.free, shape = 1, rate = b_lambda))
     
     ## Updating tau:
     a_tau <- (num.free+1)/2
-    S <- sum(theta^2/lambda^2)
+    S <- sum((weights/lambda)^2)
     b_tau <- S/2 + 1/xi
     tau <- sqrt(1/rgamma(1, shape = a_tau, rate = b_tau))
     
@@ -1523,7 +1520,7 @@ build.hodge_operators <- function(num.entities = NULL, tol = 1e-10) {
   for(idx in 1:num.pairs) {
     pair.map[pairs[idx,1], pairs[idx,2]] <- idx
   }
-
+  
   ## Build G = grad (num.pairs x N)
   G_i <- rep(1:num.pairs, 2)        # row indices
   G_j <- c(pairs[, 1], pairs[, 2])  # column indices
