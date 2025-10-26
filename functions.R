@@ -1,3 +1,16 @@
+#
+# Sourcing this R file (> source("functions.R")) results in the creation 
+# of the following 15 functions:
+#
+# For running MCMC:
+#  CBT.Gibbs, run.MCMCs, plot.MCMCs, plot.posteriors, plot.ACFs, 
+#  stats.posteriors, mcmc.extract, build.hodge_operators;
+# For generating true data:
+#  compute.Phi.true, compute.spPhi.true, compute.relations.true, compute.M, generate.comparisons;
+# Visualization:
+#  plot.networks, plot.reversed_edges.
+#
+#####################  BEGIN Functions for the CBT model  ######################
 
 ###----------------------------------------###
 ###    Cyclic Bradley-Terry (CBT) model    ###
@@ -745,7 +758,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
     }
     outputs <- list(mean = round(means, decimal), median = round(medians, decimal))
     return(outputs)
-  } else if (name == "M") {
+  } else if (name == "grad" || name == "curl" || name == "M") {
     for (chain in 1:num.chains) {
       if (!silent.flag) cat("Chain", chain, "\n")
       mcmc <- nrow(mcmc.chains[[chain]])
@@ -832,146 +845,6 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
 
 
 
-###----------------------------------###
-###    Compute Credible Intervals    ###
-###----------------------------------###
-
-## INPUT:
-# num.chains:   Number of MCMC chains;
-# mcmc.chains:  A list of specific MCMC samples from each chain;
-# name:         A string representing the name of the parameter;
-# num.entities: Number of entities (e.g., items and players)
-# level:        The credible interval level (e.g., 0.95);
-# decimal:      Number of digits for rounding the results;
-# hpd:          Logical flag: if TRUE, return the Highest Posterior Density (HPD) interval.
-
-## OUTPUT:
-# For each chain, prints the credible intervals (lower and upper bounds) for each parameter.
-
-compute.CIs <- function(num.chains = 1, mcmc.chains, name, num.entities, 
-                        level = 0.95, decimal = 3, hpd = TRUE) {
-  if (name == "Phi") {
-    cat("Credible Intervals for", name, ":\n")
-    for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
-      mcmc <- dim(mcmc.chains[[chain]])[1]
-      num.triplets <- dim(mcmc.chains[[chain]])[2]
-      triplets <- t(combn(1:num.entities, 3))
-      if(num.triplets!=nrow(triplets)){stop("Number of triplets given N is not equal to the length of Phi")}
-      
-      ## Compute credible intervals for each triplet
-      for (idx in 1:num.triplets) {
-        if (hpd) {
-          mcmc.obj <- as.mcmc(mcmc.chains[[chain]][, idx])
-          hpd.int <- coda::HPDinterval(mcmc.obj, prob = level)
-          lower <- hpd.int[1, "lower"]
-          upper <- hpd.int[1, "upper"]
-        } else {
-          lower <- quantile(mcmc.chains[[chain]][, idx], probs = (1-level)/2)
-          upper <- quantile(mcmc.chains[[chain]][, idx], probs = 1-(1-level)/2)
-        }
-        cat(paste0(name, "_", triplets[idx,1], triplets[idx,2], triplets[idx,3], 
-                   ": [", round(lower, decimal), ", ", round(upper, decimal), "]\n"))
-      }
-      cat("----------------------------\n")
-    }
-  } else if (name == "weights" || name == "lambda" || name == "nu") {
-    cat("Credible Intervals for", name, ":\n")
-    for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
-      mcmc <- dim(mcmc.chains[[chain]])[1]
-      num.free <- dim(mcmc.chains[[chain]])[2]
-      
-      ## Compute credible intervals for each triplet
-      for (idx in 1:num.free) {
-        if (hpd) {
-          mcmc.obj <- as.mcmc(mcmc.chains[[chain]][, idx])
-          hpd.int <- coda::HPDinterval(mcmc.obj, prob = level)
-          lower <- hpd.int[1, "lower"]
-          upper <- hpd.int[1, "upper"]
-        } else {
-          lower <- quantile(mcmc.chains[[chain]][, idx], probs = (1-level)/2)
-          upper <- quantile(mcmc.chains[[chain]][, idx], probs = 1-(1-level)/2)
-        }
-        cat(paste0(name, "_", triplets[idx,1], triplets[idx,2], triplets[idx,3], 
-                   ": [", round(lower, decimal), ", ", round(upper, decimal), "]\n"))
-      }
-      cat("----------------------------\n")
-    }
-  } else if (name == "s") {
-    cat("Credible Intervals for", name, ":\n")
-    for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
-      mcmc <- nrow(mcmc.chains[[chain]])
-      if(ncol(mcmc.chains[[chain]])!=num.entities){stop("Number of num.entities is not equal to the length of s")}
-      
-      ## Compute credible intervals for each parameter
-      for (n in 1:num.entities) {
-        if (hpd) {
-          mcmc.obj <- as.mcmc(mcmc.chains[[chain]][, n])
-          hpd.int <- coda::HPDinterval(mcmc.obj, prob = level)
-          lower <- hpd.int[1, "lower"]
-          upper <- hpd.int[1, "upper"]
-        } else {
-          lower <- quantile(mcmc.chains[[chain]][, n], probs = (1-level)/2)
-          upper <- quantile(mcmc.chains[[chain]][, n], probs = 1- (1 -level)/2)
-        }
-        cat(paste0(name, "_", n, ": [", round(lower, decimal), ", ", round(upper, decimal), "]\n"))
-      }
-      cat("----------------------------\n")
-    }
-  } else if (name == "M") {
-    cat("Credible Intervals for", name, ":\n")
-    for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
-      mcmc <- nrow(mcmc.chains[[chain]])
-      pairs <- t(combn(num.entities, 2))
-      num.pairs <- nrow(pairs)
-      if(ncol(mcmc.chains[[chain]])!=num.pairs){stop("Number of pairs is not equal to the length of M")}
-      
-      ## Compute credible intervals for each parameter
-      for (p in 1:num.pairs) {
-        if (hpd) {
-          mcmc.obj <- as.mcmc(mcmc.chains[[chain]][, p])
-          hpd.int <- coda::HPDinterval(mcmc.obj, prob = level)
-          lower <- hpd.int[1, "lower"]
-          upper <- hpd.int[1, "upper"]
-        } else {
-          lower <- quantile(mcmc.chains[[chain]][, p], probs = (1-level)/2)
-          upper <- quantile(mcmc.chains[[chain]][, p], probs = 1-(1-level)/2)
-        }
-        cat(paste0(name, "_", pairs[p,1], pairs[p,2], ": [", round(lower, decimal), ", ", round(upper, decimal), "]\n"))
-      }
-      cat("----------------------------\n")
-    }
-  } else {
-    cat("Credible Intervals for", name, ":\n")
-    for (chain in 1:num.chains) {
-      cat("Chain", chain, "\n")
-      mcmc <- nrow(mcmc.chains[[chain]])
-      
-      ## Compute credible intervals for each parameter
-      if (hpd) {
-        mcmc.obj <- as.mcmc(mcmc.chains[[chain]][, 1])
-        hpd.int <- coda::HPDinterval(mcmc.obj, prob = level)
-        lower <- hpd.int[1, "lower"]
-        upper <- hpd.int[1, "upper"]
-      } else {
-        lower <- quantile(mcmc.chains[[chain]][, 1], probs = (1-level)/2)
-        upper <- quantile(mcmc.chains[[chain]][, 1], probs = 1-(1-level)/2)
-      }
-      cat(paste0(name, ": [", round(lower, decimal), ", ", round(upper, decimal), "]\n"))
-      cat("----------------------------\n")
-    }
-  }
-}
-
-
-
-
-
-# Subroutines and Complementary Programs...
-
 ###---------------------------###
 ###    Extract MCMC chains    ###
 ###---------------------------###
@@ -984,7 +857,7 @@ compute.CIs <- function(num.chains = 1, mcmc.chains, name, num.entities,
 # ess:          Logical flag: if TRUE, compute and print Effective Sample Size (ESS).
 
 ## OUTPUT:
-# Returns the extracted MCMC chains for the specified parameter.
+# The extracted MCMC chains for the specified parameter.
 # Prints Rhat and ESS diagnostics for the specified parameter.
 
 mcmc.extract <- function(chains, name, num.entities, rhat = FALSE, ess = FALSE) {
@@ -1105,13 +978,74 @@ mcmc.extract <- function(chains, name, num.entities, rhat = FALSE, ess = FALSE) 
 
 
 
+###----------------------------------------------------###
+###    Build Hodge operators for the complete graph    ###
+###----------------------------------------------------###
+
+## INPUT:
+# num.entities: Number of entities (e.g., items and players);
+# tol:          Numeric. A small tolerance value to determine the rank of C.ast
+
+## OUTPUT:
+# A list containing the following sparse matrices and basis matrices:
+# G:      A sparse matrix of the gradient operator 'grad';
+# C.ast:  A sparse matrix of the curl adjoint operator 'curl*;
+# H:      A matrix whose columns form an orthonormal basis for the curl space;
+# A:      A matrix whose columns form an orthonormal basis for the kernel of C.ast.
+
+build.hodge_operators <- function(num.entities = NULL, tol = 1e-10) {
+  ## Preparation
+  pairs <- t(combn(num.entities, 2))
+  triplets <- t(combn(num.entities, 3))
+  num.pairs <- nrow(pairs)
+  num.triplets <- nrow(triplets)
+  
+  ## Indexing maps of pairs (i,j)
+  pair.map <- matrix(0, num.entities, num.entities)
+  for(idx in 1:num.pairs) {
+    pair.map[pairs[idx,1], pairs[idx,2]] <- idx
+  }
+  
+  ## Build G = grad (num.pairs x N)
+  G_i <- rep(1:num.pairs, 2)        # row indices
+  G_j <- c(pairs[, 1], pairs[, 2])  # column indices
+  G_x <- c(rep(1, num.pairs), rep(-1, num.pairs))
+  G <- sparseMatrix(i = G_i, j = G_j, x = G_x, dims = c(num.pairs, num.entities))
+  
+  ## Build C.ast = curl* (num.pairs x num.triplets)
+  pair.map.vec <- as.vector(pair.map)
+  e_ij <- pair.map.vec[triplets[, 1] + (triplets[, 2] - 1) * num.entities]
+  e_jk <- pair.map.vec[triplets[, 2] + (triplets[, 3] - 1) * num.entities]
+  e_ik <- pair.map.vec[triplets[, 1] + (triplets[, 3] - 1) * num.entities]
+  C_i <- c(e_ij, e_jk, e_ik)  # row indices
+  C_j <- c(1:num.triplets, 1:num.triplets, 1:num.triplets)  # column indices
+  C_x <- c(rep(1, num.triplets), rep(1, num.triplets), rep(-1, num.triplets))
+  C.ast <- sparseMatrix(i = C_i, j = C_j, x = C_x, dims = c(num.pairs, num.triplets))
+  
+  ## Compute row space basis H (Largest Magnitude)
+  C.ast.rank <- choose(num.entities-1,2)  # rank of C.ast
+  C.ast.svd <- svd(C.ast, nu = 0, nv = num.triplets)
+  H <- C.ast.svd$v[, 1:C.ast.rank, drop = FALSE] # basis for row space
+  A <- C.ast.svd$v[, (C.ast.rank+1):num.triplets, drop = FALSE]  # basis for null space
+  
+  outputs <- list(G = G, C.ast = C.ast, A = A, H = H)
+  return(outputs)
+}
+
+######################  END Functions for the CBT model  #######################
+
+
+
+
+##################  BEGIN Functions for generating true data  ##################
+
 ###------------------------###
 ###    Compute Phi.true    ###
 ###------------------------###
 
 ## INPUT:
 # num.entities: Number of entities (e.g., items and players).
-# weights:      A numeric vector of weights for the basis.
+# weights:      A numeric vector of weights for the basis H.
 
 ## OUTPUT:
 # Phi: The constructed Phi vector of length num.triplets.
@@ -1135,6 +1069,62 @@ compute.Phi.true <- function(num.entities = NULL, weights = NULL) {
 
 
 
+###----------------------------------------------###
+###    Compute Sparse Phi via L1 Optimization    ###
+###----------------------------------------------###
+
+## INPUT:
+# num.entities:   Number of entities (e.g., items and players);
+# norm:           The L2 norm for the final sparse Phi vector.
+# seed:           Integer: Random seed for reproducibility.
+# sparsity.level: Numeric.
+# maxit:          Numeric.
+# tol:            Numeric. A small tolerance value to determine
+
+## OUTPUT:
+# A sparse Phi vector that satisfies the model constraints.
+
+compute.spPhi.true <- function(num.entities = NULL, norm = NULL, seed = 1,
+                               sparsity.level = 0.9, maxit = 500, tol = 1e-10,s) {
+  ## Preparation
+  set.seed(seed)
+  num.triplets <- choose(num.entities,3)
+  num.free <- choose(num.entities-1,2)
+  operators <- build.hodge_operators(num.entities)
+  H <- operators$H
+  
+  ## Generate random vector from col(H)
+  w  <- rnorm(num.free)
+  Phi <- as.vector(H %*% w)
+  const <- sqrt(sum(Phi^2))
+  if (const > 0) Phi <- Phi * (norm / const) # Normalization  
+  prox.L1 <- function(v, lambda) sign(v) * pmax(abs(v) - lambda, 0) # Soft-thresholding (Proximal operator)
+
+  ## Optimization procedure
+  for (iter in 1:maxit) {
+    Phi.old <- Phi
+    
+    # Sparsification: set the threshold level based on quantile
+    lambda <- quantile(abs(Phi), probs = sparsity.level)
+    Phi.tmp <- prox.L1(Phi, lambda)
+    
+    # Orthogonal projection back to col(H) via least square
+    w <- qr.solve(H, Phi.tmp)
+    Phi <- as.vector(H %*% w)
+    const <- sqrt(sum(Phi^2))
+    if (const > 0) Phi <- Phi * (norm / const) # Normalization
+    
+    # Check convergence
+    epsilon <- sqrt(sum((Phi - Phi.old)^2)) / sqrt(sum(Phi.old^2))
+    if (epsilon < tol) break
+  }
+  
+  list(weights = w, Phi = Phi, iter = iter, sparsity = mean(abs(Phi) < 1e-4))
+}
+
+
+
+
 ###----------------------###
 ###    Compute M.true    ###
 ###----------------------###
@@ -1146,7 +1136,7 @@ compute.Phi.true <- function(num.entities = NULL, weights = NULL) {
 # Phi.prior:    A num.triplets×1 vector representing the triangular parameters.
 
 ## OUTPUT:
-# Returns An num.entities × num.entities integer matrix of simulated win counts.
+# An num.entities × num.entities integer matrix of simulated win counts.
 
 compute.relations.true <- function(num.entities = NULL, s = NULL, Phi = NULL) {
   ## Preparation
@@ -1208,7 +1198,7 @@ compute.M <- function(df) {
 
 
 ###----------------------------###
-###    generate.comparisons    ###
+###    Generate comparisons    ###
 ###----------------------------###
 
 ## INPUT:
@@ -1255,6 +1245,62 @@ generate.comparisons <- function(num.entities = NULL, freq.vec = NULL,
 
 
 
+###--------------------------------###
+###    Generate artificial data    ###
+###--------------------------------###
+
+## INPUT:
+# num.entities: Number of entities (e.g., items and players);
+# s_interval:   Numeric. The interval used to generate an intrinsic parameter;
+# freq.pair:    Integer. The number of comparisons to simulate for each unique pair;
+# weights:      A numeric vector of weights for the basis H.
+
+## OUTPUT:
+# A list containing the true parameters and generated data: 
+# s.true, w.true, Phi.true, M.true, artificial.data, entity.names
+
+generate.artificial <- function(num.entities = NULL, s_interval = 0.5, freq.pair = 30, weights = NULL) {
+  ## Preparation
+  num.free <- choose(num.entities-1,2)
+  num.pairs <- choose(num.entities, 2)
+  entity.names <- paste("Entity", 1:num.entities)
+  freq.vec <- rep(freq.pair, num.pairs)
+  
+  ## Generate s.true (intrinsic parameters)
+  s.true <- seq(from = s_interval, by = s_interval, length.out = num.entities)
+  s.true <- s.true - mean(s.true) # centering
+  
+  ## Compute Phi.true (triangular parameters)
+  Phi.true <- compute.Phi.true(num.entities = num.entities, weights = w.true)
+  
+  ## Compute relation.true (relations matrix)
+  relations.true <- compute.relations.true(num.entities = num.entities, s = s.true, Phi = Phi.true)
+  
+  ## Generate comparison data
+  artificial.counts <- generate.comparisons(num.entities = num.entities,
+                                            freq.vec = freq.vec,
+                                            s = s.true,
+                                            Phi = Phi.true)
+  rownames(artificial.counts) <- colnames(artificial.counts) <- entity.names
+  
+  ## Convert to binomial format
+  artificial.data <- countsToBinomial(artificial.counts)
+  artificial.data$n_ij <- artificial.data$win1 + artificial.data$win2
+  artificial.data$y_ij <- artificial.data$win1
+  
+  result <- list(X = artificial.data, entity.names = entity.names, s = s.true, 
+                 weights = weights, Phi = Phi.true, relations = relations.true)
+  return(result)
+}
+
+
+##################  BEGIN Functions for generating true data  ##################
+
+
+
+
+########################  BEGIN Visualization functions ########################
+
 ###---------------------------###
 ###    Plot match networks    ###
 ###---------------------------###
@@ -1263,20 +1309,20 @@ generate.comparisons <- function(num.entities = NULL, freq.vec = NULL,
 # relations:      A matrix or data.frame with columns for 'grad', 'curl', 'M';
 # num.entities:   Number of entities (e.g., items and players);
 # components:     A character vector specifying which columns of relations to plot.
-#                 Defaults: c("grad", "curl", "M").
+#                         Defaults: c("grad", "curl", "M").
 # edge.label:     Logical flag: if TRUE, print edge labels as "w_win-w_lose" on the plot;
 # draw.flag:      Logical flag: if TRUE, plot the graph on the plot;
 # layout.coords:  A matrix of coordinates for the graph layout;
 # weight:         Character scalar, one of c("diff","prop");
-#                 "diff" uses max(win1, win2) - min(win1,win2); "prop" uses max(win1,win2) / min(win1,win2);
+#                         "diff" uses max(win1, win2) - min(win1,win2); "prop" uses max(win1,win2) / min(win1,win2);
 # layout:         Character scalar, one of c("fr","circle");
-#                 "fr" = Fruchterman–Reingold; "circle" = circular layout;
+#                         "fr" = Fruchterman–Reingold; "circle" = circular layout;
 # tie_mode:       Character scalar, one of c("skip","thin");
-#                 "skip" drops tied edges; "thin" keeps them.
+#                         "skip" drops tied edges; "thin" keeps them.
 
 ##OUTPUT
+# An directed graph created from relations.
 # Draws the specified network graphs and invisibly returns a list containing the graph objects.
-# Return value: An directed graph created from relations.
 
 plot.networks <- function(relations, num.entities = NULL, components = c("grad", "curl", "M"), 
                           edge.label = FALSE, draw.flag = TRUE, layout.coords = NULL,
@@ -1461,6 +1507,7 @@ plot.reversed_edges <- function(graphs.estimated, graphs.true, layout.coords) {
          vertex.size = 0,
          vertex.label = NA,
          edge.color = "grey80",
+         edge.width = 1,
          edge.arrow.size = 0.3,
          edge.label = NA,
          main = sprintf("%s", comp.name)
@@ -1482,70 +1529,11 @@ plot.reversed_edges <- function(graphs.estimated, graphs.true, layout.coords) {
            vertex.label.color = "grey10",
            edge.color = "orange",
            edge.width = 3,
-           edge.arrow.size = 0.6
+           edge.arrow.size = 0.3
       )
     }
   }
   return(invisible(diff_data))
 }
 
-
-
-
-
-###----------------------------------------------------###
-###    Build Hodge operators for the complete graph    ###
-###----------------------------------------------------###
-
-## INPUT:
-# num.entities: Number of entities (e.g., items and players);
-# tol:          Numeric. A small tolerance value to determine the rank of C.ast
-
-## OUTPUT:
-# Returns A list containing the following sparse matrices and basis matrices:
-# G:      A sparse matrix of the gradient operator 'grad';
-# C.ast:  A sparse matrix of the curl adjoint operator 'curl*;
-# H:      A matrix whose columns form an orthonormal basis for the curl space;
-# A:      A matrix whose columns form an orthonormal basis for the kernel of C.ast.
-
-build.hodge_operators <- function(num.entities = NULL, tol = 1e-10) {
-  ## Preparation
-  pairs <- t(combn(num.entities, 2))
-  triplets <- t(combn(num.entities, 3))
-  num.pairs <- nrow(pairs)
-  num.triplets <- nrow(triplets)
-  
-  ## Indexing maps of pairs (i,j)
-  pair.map <- matrix(0, num.entities, num.entities)
-  for(idx in 1:num.pairs) {
-    pair.map[pairs[idx,1], pairs[idx,2]] <- idx
-  }
-  
-  ## Build G = grad (num.pairs x N)
-  G_i <- rep(1:num.pairs, 2)        # row indices
-  G_j <- c(pairs[, 1], pairs[, 2])  # column indices
-  G_x <- c(rep(1, num.pairs), rep(-1, num.pairs))
-  G <- sparseMatrix(i = G_i, j = G_j, x = G_x, dims = c(num.pairs, num.entities))
-  
-  ## Build C.ast = curl* (num.pairs x num.triplets)
-  pair.map.vec <- as.vector(pair.map)
-  e_ij <- pair.map.vec[triplets[, 1] + (triplets[, 2] - 1) * num.entities]
-  e_jk <- pair.map.vec[triplets[, 2] + (triplets[, 3] - 1) * num.entities]
-  e_ik <- pair.map.vec[triplets[, 1] + (triplets[, 3] - 1) * num.entities]
-  C_i <- c(e_ij, e_jk, e_ik)  # row indices
-  C_j <- c(1:num.triplets, 1:num.triplets, 1:num.triplets)  # column indices
-  C_x <- c(rep(1, num.triplets), rep(1, num.triplets), rep(-1, num.triplets))
-  C.ast <- sparseMatrix(i = C_i, j = C_j, x = C_x, dims = c(num.pairs, num.triplets))
-  
-  ## Compute Column-space basis H (Largest Magnitude)
-  C.ast.rank <- choose(num.entities-1,2)  # rank of C.ast
-  svd_H <- svds(C.ast, k = C.ast.rank, which = "LM", nu = 0)
-  H <- svd_H$v
-  
-  ## Compute Null-space basis A (Smallest Magnitude)
-  svd_A <- svds(C.ast, k = nrow(C.ast) - C.ast.rank, which = "SM", nu = 0)
-  A <- svd_A$v
-  
-  outputs <- list(G = G, C.ast = C.ast, A = A, H = H)
-  return(outputs)
-}
+#########################  END Visualization functions #########################

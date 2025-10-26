@@ -1,5 +1,7 @@
 #
-# Sourcing this R file contains tdbt.estimation.
+# Sourcing this R file contains 3 parts.
+#
+# import & setting, BradleyTerry2 package, CBT.Gibbs
 #
 ######################  BEGIN import & setting  ################################
 
@@ -16,18 +18,22 @@ source("database.R")
 #                               weight = "prop", layout = "circle", tie_mode = "skip")
 
 ## For artificial data.
-N <- 30
-X <- database[[paste0("artificial", N)]]
-entities.name <- database[[paste0("artificial.name", N)]]
-networks.true <- plot.networks(database[[paste0("M.true", N)]], num.entities = N, 
+N <- 50
+num.free <- choose(N-1,2)
+#w.true <- rep(0, num.free)
+#w.true[1] <- 2
+#w.true[6] <- 1.5
+w.true <- compute.spPhi.true(num.entities = N, norm = 10, seed = 1, sparsity.level = 0.95)$weights
+artificial.data <- generate.artificial(num.entities = N, s_interval = 0.5, freq.pair = 100, weights = w.true)
+X <- artificial.data$X
+entities.name <- artificial.data$entity.names
+networks.true <- plot.networks(artificial.data$relation, num.entities = N,
                                components = c("grad", "curl", "M"), 
                                weight = "prop", layout = "circle", tie_mode = "skip")
 
 ## Preparation
 triplets <- t(combn(1:N, 3))
 num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
-num.kernel <- ncol(combn(N-1,3))
-num.free <- num.triplets-num.kernel
 num.iter <- 10000
 num.burn <- num.iter/5
 
@@ -77,11 +83,11 @@ plot.reversed_edges(network.BT$graphs, networks.true$graphs, networks.true$layou
 ######################  END BradleyTerry2 package  #############################
 
 
-###########################  BEGIN TDBT.Gibbs  #################################
+##############################  BEGIN CBT.Gibbs  ###############################
 
 ## Prior specification
 num.chains <- 1
-param.name <- "weights"  # Options: (s, weights, Phi, lambda, tau, nu, xi, grad, curl, M)
+param.name <- "Phi"  # Options: (s, weights, Phi, lambda, tau, nu, xi, grad, curl, M)
 s.prior <- rep(0, N)
 Phi.prior <- rep(0, num.triplets)
 lambda.prior <- rep(1, num.free)

@@ -12,6 +12,7 @@ library(BayesLogit)
 library(MASS)
 library(RSpectra)
 library(Matrix)
+library(quadprog)
 library(truncdist)
 library(TruncatedNormal)
 
