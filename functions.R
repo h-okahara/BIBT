@@ -304,7 +304,7 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
       }
     }
     mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "M") {
+  } else if (name == "grad" || name == "curl" || name == "M") {
     mcmc <- nrow(mcmc.chains[[1]])
     pairs <- t(combn(num.entities, 2))
     num.pairs <- nrow(pairs)
@@ -432,7 +432,7 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, bin
       }
     }
     mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "M") {
+  } else if (name == "grad" || name == "curl" || name == "M") {
     mcmc <- nrow(mcmc.chains[[1]])
     pairs <- t(combn(num.entities, 2))
     num.pairs <- nrow(pairs)
@@ -626,13 +626,15 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
 # hpd:          Logical flag: if TRUE, return the Highest Posterior Density (HPD) interval;
 # decimal:      Number of decimal places.
 # silent.flag:  Logical flag: if FALSE, print the estimated results.
+# null.flag:    Logical flag: if TRUE, sets the posterior mean/median of parameters (grad, curl, M) 
+#               to 0 if their credible interval contains 0.
 
 ## OUTPUT:
 # For each chain, prints a data frame of posterior statistics (mean and median) for each parameter.
 
 stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
                              CI = TRUE, level = 0.95, hpd = TRUE, decimal = 4, 
-                             silent.flag = FALSE) {
+                             silent.flag = FALSE, null.flag = FALSE) {
   if (name == "Phi") {
     for (chain in 1:num.chains) {
       if (!silent.flag) cat("Chain", chain, "\n")
@@ -646,7 +648,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
       medians <- apply(mcmc.chains[[chain]], 2, median)
       sds <- apply(mcmc.chains[[chain]], 2, sd)
       
-      ## Compute credible intervals for each trianglar parameter
+      ## Compute credible intervals for each parameter
       if (CI) {
         if (hpd) {
           mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
@@ -655,7 +657,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
           upper <- hpd.int[ , "upper"]
         } else {
           pr <- c((1-level)/2, 1-(1-level)/2)
-          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          q  <- apply(mcmc.chains[[chain]], 2, stats::quantile, probs = pr, names = FALSE)
           lower <- q[1, ]
           upper <- q[2, ]
         }
@@ -689,7 +691,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
       medians <- apply(mcmc.chains[[chain]], 2, median)
       sds <- apply(mcmc.chains[[chain]], 2, sd)
       
-      ## Compute credible intervals for each trianglar parameter
+      ## Compute credible intervals for each parameter
       if (CI) {
         if (hpd) {
           mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
@@ -698,7 +700,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
           upper <- hpd.int[ , "upper"]
         } else {
           pr <- c((1-level)/2, 1-(1-level)/2)
-          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          q  <- apply(mcmc.chains[[chain]], 2, stats::quantile, probs = pr, names = FALSE)
           lower <- q[1, ]
           upper <- q[2, ]
         }
@@ -729,7 +731,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
       medians <- apply(mcmc.chains[[chain]], 2, median)
       sds <- apply(mcmc.chains[[chain]], 2, sd)
       
-      ## Compute credible intervals for each trianglar parameter
+      ## Compute credible intervals for each parameter
       if (CI) {
         if (hpd) {
           mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
@@ -738,7 +740,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
           upper <- hpd.int[ , "upper"]
         } else {
           pr <- c((1-level)/2, 1-(1-level)/2)
-          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          q  <- apply(mcmc.chains[[chain]], 2, stats::quantile, probs = pr, names = FALSE)
           lower <- q[1, ]
           upper <- q[2, ]
         }
@@ -771,7 +773,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
       medians <- apply(mcmc.chains[[chain]], 2, median)
       sds     <- apply(mcmc.chains[[chain]], 2, sd)
       
-      ## Compute credible intervals for each trianglar parameter
+      ## Compute credible intervals for each parameter
       if (CI) {
         if (hpd) {
           mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
@@ -780,7 +782,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
           upper <- hpd.int[ , "upper"]
         } else {
           pr <- c((1-level)/2, 1-(1-level)/2)
-          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          q  <- apply(mcmc.chains[[chain]], 2, stats::quantile, probs = pr, names = FALSE)
           lower <- q[1, ]
           upper <- q[2, ]
         }
@@ -798,6 +800,15 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
       if (!silent.flag) print(stats, row.names = FALSE)
       if (!silent.flag) cat("----------------------------\n")
     }
+
+    # Find indices where the credible interval includes 0 (i.e., lower < 0 and upper > 0)
+    if (null.flag && CI) {
+      null_indices <- which(lower < 0 & upper > 0)
+      
+      # Set their returned mean and median to 0
+      if (length(null_indices) > 0) means[null_indices] <- medians[null_indices] <- 0
+    }
+    
     outputs <- list(mean = round(means, decimal), median = round(medians, decimal))
     return(outputs)
   } else {
@@ -810,7 +821,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
       medians <- apply(mcmc.chains[[chain]], 2, median)
       sds <- apply(mcmc.chains[[chain]], 2, sd)
       
-      ## Compute credible intervals for each trianglar parameter
+      ## Compute credible intervals for each parameter
       if (CI) {
         if (hpd) {
           mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
@@ -819,7 +830,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
           upper <- hpd.int[ , "upper"]
         } else {
           pr <- c((1-level)/2, 1-(1-level)/2)
-          q  <- apply(mat, 2, stats::quantile, probs = pr, names = FALSE)
+          q  <- apply(mcmc.chains[[chain]], 2, stats::quantile, probs = pr, names = FALSE)
           lower <- q[1, ]
           upper <- q[2, ]
         }

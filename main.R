@@ -18,13 +18,13 @@ source("database.R")
 #                               weight = "prop", layout = "circle", tie_mode = "skip")
 
 ## For artificial data.
-N <- 50
+N <- 10
 num.free <- choose(N-1,2)
 #w.true <- rep(0, num.free)
 #w.true[1] <- 2
 #w.true[6] <- 1.5
 w.true <- compute.spPhi.true(num.entities = N, norm = 10, seed = 1, sparsity.level = 0.95)$weights
-artificial.data <- generate.artificial(num.entities = N, s_interval = 0.5, freq.pair = 100, weights = w.true)
+artificial.data <- generate.artificial(num.entities = N, s_interval = 0.5, freq.pair = 300, weights = w.true)
 X <- artificial.data$X
 entities.name <- artificial.data$entity.names
 networks.true <- plot.networks(artificial.data$relation, num.entities = N,
@@ -87,7 +87,7 @@ plot.reversed_edges(network.BT$graphs, networks.true$graphs, networks.true$layou
 
 ## Prior specification
 num.chains <- 1
-param.name <- "Phi"  # Options: (s, weights, Phi, lambda, tau, nu, xi, grad, curl, M)
+param.name <- "curl"  # Options: (s, weights, Phi, lambda, tau, nu, xi, grad, curl, M)
 s.prior <- rep(0, N)
 Phi.prior <- rep(0, num.triplets)
 lambda.prior <- rep(1, num.free)
@@ -116,7 +116,8 @@ statistic <- "mean" # "median"
 components <- c("grad", "curl", "M")
 list.estimates <- lapply(components, function(comp.name) {
   stats.posteriors(num.chains, mcmc.extract(mcmc.results$all.mcmc, comp.name, N),
-                   name = comp.name, num.entities = N, decimal = 3, silent.flag = TRUE)
+                   name = comp.name, num.entities = N, decimal = 3,
+                   silent.flag = TRUE, null.flag = TRUE)
   })
 list.estimates <- lapply(list.estimates, `[[`, statistic)
 relations.estimates <- do.call(cbind, list.estimates)
