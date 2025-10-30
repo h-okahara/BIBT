@@ -2,15 +2,16 @@
 # Sourcing this R file (> source("functions.R")) results in the creation 
 # of the following 15 functions:
 #
-# For running MCMC:
-#  CBT.Gibbs, run.MCMCs, plot.MCMCs, plot.posteriors, plot.ACFs, 
-#  stats.posteriors, mcmc.extract, build.hodge_operators;
-# For generating true data:
-#  compute.Phi.true, compute.spPhi.true, compute.relations.true, compute.M, generate.comparisons;
-# Visualization:
-#  plot.networks, plot.reversed_edges.
+# - For Constructing Each Model:
+#     CBT.Gibbs, BT.freq, BBT.Gibbs, ICBT.Gibbs
+# - For Running MCMC:
+#     run.MCMCs, plot.MCMCs, plot.posteriors, plot.ACFs, stats.posteriors, mcmc.extract, build.hodge_operators;
+# - For Generating True Data:
+#     compute.Phi.true, compute.spPhi.true, compute.relations.true, compute.M, generate.comparisons;
+# - For Visualization:
+#     plot.networks, plot.reversed_edges.
 #
-#####################  BEGIN Functions for the CBT model  ######################
+######################  BEGIN Functions for each models  #######################
 
 ###----------------------------------------###
 ###    Cyclic Bradley-Terry (CBT) model    ###
@@ -30,14 +31,14 @@
 # xi.prior:     A scalar representing the scalar of tau.prior.
 
 ## OUTPUT:
-# A list of MCMC samples for the parameters: omega, s, Phi, lambda, tau, nu, xi.
+# A list of MCMC samples for the parameters: omega, s, Phi, lambda, tau, nu, xi, grad, curl, M.
 
-CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
+CBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1,
                       s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL,
                       lambda.prior = NULL, tau.prior = NULL, 
                       nu.prior = NULL, xi.prior = NULL) {
   ## Preparation
-  entity.name <- unique(c(X[ ,1], X[ ,2]))
+  entity.name <- unique(c(X$player1, X$player2))
   N <- length(entity.name)  # number of entities
   pairs <- t(combn(N, 2))
   triplets <- t(combn(1:N, 3))
@@ -169,12 +170,230 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
 
 
 
-###------------------------------------------###
-###    Run Multiple Chains for TDBT.Gibbs    ###
-###------------------------------------------###
+##---------------------------------------------------------------------###
+###    Bayesian Bradley-Terry (BBT) model with PG data augmentation    ###
+###--------------------------------------------------------------------###
 
 ## INPUT:
+# X:            An N×N matrix where the (i,j) entry indicates that player i defeats player j;
+# mcmc:         Number of iterations;
+# burn:         Burn-in period;
+# thin:         A thinning interval;
+# s.prior:      A N×1 vector representing the score of each subject;
+# sigma.prior:  A scalar representing variance of score s_t for t=1,...,N.
+
+## OUTPUT:
+# A list of MCMC samples for the parameters: omega, s, grad, M.
+
+BBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1, 
+                      s.prior = NULL, sigma.prior = NULL) {
+  ## Preparation
+  entity.name <- unique(c(X$player1, X$player2))
+  N <- length(entity.name)  # number of entities
+  pairs <- t(combn(N, 2))
+  num.pairs <- nrow(pairs)  # number of unique (i,j) pairs
+  
+  ## Initial values
+  omega <- rep(0, num.pairs)
+  kappa <- X$y_ij - X$n_ij/2
+  s      <- if(is.null(s.prior))  rep(0, N) else s.prior
+  sigma  <- if(is.null(sigma.prior))  1 else sigma.prior
+  
+  ## Build operators
+  operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
+  G <- operators$G  # G = grad (num.pairs x N)
+  M.vec <- as.vector(G %*% s) # Match-up function: 
+  
+  ## Define matrices for posterior samples
+  mcmc.row  <- ((mcmc-burn) - (mcmc-burn) %% thin) / thin
+  s.pos     <- matrix(0, nrow = mcmc.row, ncol = N)
+  M.pos     <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
+  
+  sample.idx <- 0
+  #=======================   BEGIN MCMC sampling   =============================
+  for (iter in 1:mcmc) {
+    # -----------------------  BEGIN Updating  ---------------------------------
+    ## Updating omega: sample omega from Pólya-Gamma distribution
+    omega <- rpg(n = num.pairs, h = X$n_ij, z = M.vec)
+    
+    ## Updating s: N×1 score vector
+    Prec_s <- Diagonal(N)/sigma^2 + crossprod(G, omega * G)
+    Prec_s <- forceSymmetric(Prec_s, uplo = "U")
+    U_s <- chol(Prec_s)
+    B_s <- crossprod(G, kappa)
+    tmp_s <- forwardsolve(t(U_s), B_s)
+    mu_s <- backsolve(U_s, tmp_s)
+    v_s <- rnorm(N)
+    z_s <- backsolve(U_s, v_s)
+    s <- mu_s + z_s
+    s <- s - mean(s)  # Identification
+    
+    ## Updating other parameters
+    M.vec <- as.vector(G %*% s)
+    
+    # ------------------------  END Updating  ----------------------------------
+    if (iter > burn && (iter-burn) %% thin == 0) { # Store posterior samples
+      sample.idx <- sample.idx + 1
+      
+      ## Store posterior samples
+      s.pos[sample.idx, ] <- as.vector(s)
+      M.pos[sample.idx, ] <- as.vector(M.vec)
+    }
+  }
+  #=======================   END MCMC sampling   ===============================
+  
+  result <- list(s = s.pos, grad = M.pos, M = M.pos)
+  return(result)
+}
+
+
+
+
+###--------------------------------------------------------###
+###    Bayesian Bradley-Terry (BT) model (Wainer,2023)    ###
+###--------------------------------------------------------###
+
+## INPUT:
+# X:            An N×N matrix where the (i,j) entry indicates that player i defeats player j;
 # num.chains:   Number of independent MCMC chains to run;
+# mcmc:         Number of iterations;
+# burn:         Burn-in period;
+# thin:         A thinning interval;
+# hyper_prior:  The code of the hyper-prior for the sigma
+#     * 0 = lognormal(0.5) - the default,
+#     * 1 = lognormal(scale),
+#     * 2 = cauchy(scale),
+#     * 3 = normal(scale)
+# scale:        The scale of the hyper prior for the sigma parameter
+
+## OUTPUT:
+# A list of MCMC samples for the parameters: s, sigma, grad, M.
+
+BBT.Stan <- function(X, num.chains = 1, mcmc = 10000, burn = 2000, thin = 1, seed = 73) {
+  ## Preparation
+  entity.name <- unique(c(X$player1, X$player2))
+  N <- length(entities.name) # number of entities
+  num.pairs <- nrow(X)                  # number of pairs
+  player1_id <- match(X$player1, entities.name)
+  player2_id <- match(X$player2, entities.name)
+  operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
+  G <- operators$G  # G = grad (num.pairs x )
+  
+  ## Create dataset for Stan
+  data <- list(num_entities = N, 
+               num_pairs = num.pairs,
+               player1 = player1_id, 
+               player2 = player2_id,
+               win1 = X$win1, 
+               win2 = X$win2)
+  
+  ## Directory for Stan compiled file and csv files
+  options(mc.cores = parallel::detectCores(logical = FALSE))
+  outdir <- tempdir()
+  dir.create(outdir, showWarnings = FALSE)
+  
+  ## Define the Bayesian Bradley-Terry (BBT) model in Stan
+  model <- cmdstan_model("bbt.stan", dir = outdir)
+  fit <- model$sample(
+    data = data,
+    refresh = 0,
+    output_dir = outdir,
+    iter_sampling = mcmc-burn,
+    iter_warmup = burn,
+    chains = num.chains,
+    thin = thin
+  )
+  
+  ## Extract samples from chains
+  samples.pos <- fit$draws()
+  chains <- parallel::mclapply(1:num.chains, function(chain.id) {
+    s.pos <- matrix(samples.pos[ , chain.id, paste0('s[', 1:N, ']')], ncol = N)
+    s.pos <- s.pos - rowMeans(s.pos)
+    sigma.pos <- matrix(samples.pos[ , chain.id, 'sigma'], ncol = 1)
+    grad.pos <- M.pos <- matrix(samples.pos[ , chain.id, paste0('M[', 1:num.pairs, ']')], ncol = num.pairs)
+    
+    return(list(s = s.pos, sigma = sigma.pos, grad = grad.pos, M = M.pos))
+  })
+  return(chains)
+}
+
+
+
+###--------------------------------###
+###    Bradley-Terry (BT) model    ###
+###--------------------------------###
+
+## INPUT:
+# X:            An N×N matrix where the (i,j) entry indicates that player i defeats player j;
+# sort.flag:    Logical flag: if TRUE, sort the entity along with `desc.flag';
+# desc.flag:    Logical flag: if TRUE, sort the entity in descending order;
+# draw.flag:    Logical flag: if TRUE, plot the graph on the plot;
+# decimal:      Number of decimal places.
+
+## OUTPUT
+# An directed graph created from relations.
+# Draws the specified network graphs and invisibly returns a list containing the graph objects.
+
+BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE, draw.flag = FALSE, decimal = 3) {
+  ## Preparation
+  entity.name <- unique(c(X$player1, X$player2))
+  N <- length(entity.name)  # number of entities
+  reference <- entities.name[N] # fix the last entity
+  citeModel <- BTm(data = X, outcome = cbind(win1, win2), player1, player2,
+                   formula = ~player, id = "player", refcat = reference)
+  
+  ## Set up the plotting area
+  par(mfrow = c(1, 1), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
+  
+  ## the MLEs of strength parameters and visualization
+  citations.qv <- qvcalc(BTabilities(citeModel))
+  if (sort.flag) {
+    idx <- order(citations.qv$qvframe$estimate, decreasing = desc.flag)
+    qvframe.sorted <- citations.qv$qvframe[idx, ]
+    citations.qv.sorted <- citations.qv
+    citations.qv.sorted$qvframe <- qvframe.sorted
+    names.sorted <- rownames(citations.qv$qvframe)[idx]
+    if (draw.flag) plot(citations.qv.sorted, levelNames = names.sorted)
+  } else {
+    qvframe.sorted <- citations.qv$qvframe[rep(1:N), ]
+    citations.qv.sorted <- citations.qv
+    citations.qv.sorted$qvframe <- qvframe.sorted
+    names.sorted <- rownames(citations.qv$qvframe)[1:N]
+    if (draw.flag) plot(citations.qv.sorted, levelNames = names.sorted) 
+  }
+  
+  ## Visualization
+  pairs <- t(combn(N, 2))
+  M.BT <- citations.qv$qvframe$estimate[pairs[,1]] - citations.qv$qvframe$estimate[pairs[,2]]
+  relations.BT <- round(cbind(M.BT, M.BT), decimal)
+  colnames(relations.BT) <- c("grad", "M")
+  network.BT <- plot.networks(relations.BT, num.entities = N, components = c("grad", "M"), 
+                              layout.coords = networks.true$layout, draw.flag = draw.flag,
+                              weight = "prop", layout = "circle", tie_mode = "skip")
+  if (draw.flag) plot.reversed_edges(network.BT$graphs, networks.true$graphs, networks.true$layout)
+  
+  output <- list(s = citations.qv$qvframe$estimate, M = M.BT,
+                 graphs = network.BT$graphs, layout = network.BT$layout)
+  return(invisible(output))
+}
+
+
+#######################  END Functions for each models  ########################
+
+
+
+
+#############################  BEGIN Subroutines  ##############################
+
+###-----------------------------------------###
+###    Run Multiple MCMCs for each model    ###
+###-----------------------------------------###
+
+## INPUT:
+# model:        A character vector specifying which model to run MCMC.
+#                         Defaults: c("BBT", "ICBT", "CBT");
+# num.chains:   Number of independent MCMC chains to run;
+# num.entities: Number of entities (e.g., items and players).
 # name:         A string representing the name of parameters;
 # MCMC.plot     Logical flag: if TRUE, print MCMC sample paths for the specified parameters;
 # rhat:         Logical flag: if TRUE, compute and print Rhat values;
@@ -183,6 +402,7 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
 # mcmc:         Number of iterations;
 # burn:         Burn-in period;
 # thin:         A thinning interval;
+# seed:         Integer: Random seed for reproducibility.
 # s.prior:      A N×1 vector representing the score of each subject;
 # sigma.prior:  A scalar representing variance of score s_t for t=1,...,N;
 # Phi.prior:    A num.triplets×1 vector representing the triangular parameters;
@@ -194,25 +414,38 @@ CBT.Gibbs <- function(X, mcmc = 30000, burn = 5000, thin = 1,
 ## OUTPUT:
 # A list of MCMC draws from multiple chains.
 
-run.MCMCs <- function(num.chains = 1, name, num.entities = NULL, 
-                      MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
-                      X, mcmc = 10000, burn = 2000, thin = 1,
+run.MCMCs <- function(model = c("BBT.Stan","BBT.Gibbs","ICBT","CBT"), num.chains = 1, 
+                      num.entities = NULL, name = NULL, MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
+                      X, mcmc = 10000, burn = 2000, thin = 1, seed = 73,
                       s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL, 
                       tau.prior = NULL, lambda.prior = NULL, 
                       nu.prior = NULL, xi.prior = NULL) {
   start.time <- Sys.time()
   
-  ## Run multiple MCMC chains
-  chains <- parallel::mclapply(1:num.chains, function(chain.id) {
-    set.seed(73 + chain.id)
-    CBT.Gibbs(X, mcmc = mcmc, burn = burn, thin = thin,
-              s.prior = s.prior, sigma.prior = sigma.prior, Phi.prior = Phi.prior, 
-              tau.prior = tau.prior, lambda.prior = lambda.prior, 
-              nu.prior = nu.prior, xi.prior = xi.prior)
-  }, mc.cores = min(num.chains, parallel::detectCores()-1))
+  ## Run multiple MCMC chains for each model
+  if (model == "CBT") {
+    chains <- parallel::mclapply(1:num.chains, function(chain.id) {
+      set.seed(seed + chain.id)
+      CBT.Gibbs(X, mcmc = mcmc, burn = burn, thin = thin,
+                s.prior = s.prior, sigma.prior = sigma.prior, Phi.prior = Phi.prior, 
+                tau.prior = tau.prior, lambda.prior = lambda.prior, 
+                nu.prior = nu.prior, xi.prior = xi.prior)
+    }, mc.cores = min(num.chains, parallel::detectCores()-1))
+  } else if (model == "BBT.Gibbs") {
+    chains <- parallel::mclapply(1:num.chains, function(chain.id) {
+      set.seed(seed + chain.id)
+      BBT.Gibbs(X, mcmc = mcmc, burn = burn, thin = thin,
+                s.prior = s.prior, sigma.prior = sigma.prior)
+    }, mc.cores = min(num.chains, parallel::detectCores()-1))
+  } else if (model == "BBT.Stan") {
+    chains <- BBT.Stan(X, num.chains = num.chains, mcmc = mcmc, burn = burn, 
+                       thin = thin, seed = seed)
+  } else if (model == "ICBT") {
+    
+  }
   
   ## Extract samples of specific parameter (name) from chains
-  mcmc.chains <- mcmc.extract(chains, name, num.entities, rhat = rhat, ess = ess)
+  mcmc.chains <- mcmc.extract(chains, num.entities, name, rhat = rhat, ess = ess)
   
   ## Plot MCMC sample paths
   if (MCMC.plot) {
@@ -233,13 +466,13 @@ run.MCMCs <- function(num.chains = 1, name, num.entities = NULL,
 ## INPUT:
 # num.chains:   Number of MCMC chains;
 # mcmc.chains:  A list of specific MCMC samples from each chain;
-# name:         A string representing the name of parameters;
-# num.entities: Number of entities (e.g., items and players).
+# num.entities: Number of entities (e.g., items and players);
+# name:         A string representing the name of parameters.
 
 ## OUTPUT:
 # Overlayed trace plots (sample paths) for each parameter.
 
-plot.MCMCs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
+plot.MCMCs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL,  name = NULL) {
   if (name == "Phi") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.triplets <- dim(mcmc.chains[[1]])[2]
@@ -354,14 +587,15 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
 ## INPUT:
 # num.chains:   Number of MCMC chains;
 # mcmc.chains:  A list of specific MCMC samples from each chain;
-# name:         A string representing the name of the parameter;
 # num.entities: Number of entities (e.g., items and players);
+# name:         A string representing the name of the parameter;
 # bins:         Number of bins for the histogram.
 
 ## OUTPUT:
 # Histograms with density curves for each parameter, overlaying traces from all chains.
 
-plot.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, bins = 30) {
+plot.posteriors <- function(num.chains = 1, mcmc.chains = NULL, 
+                            num.entities = NULL, name = NULL, bins = 30) {
   if (name == "Phi") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.triplets <- dim(mcmc.chains[[1]])[2]
@@ -486,13 +720,13 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities, bin
 ## INPUT:
 # num.chains:   Number of MCMC chains;
 # mcmc.chains:  A list of specific MCMC samples from each chain;
-# name:         A string representing the name of the parameter;
-# num.entities: Number of entities (e.g., items and players).
+# num.entities: Number of entities (e.g., items and players);
+# name:         A string representing the name of the parameter.
 
 ## OUTPUT:
 # Plots the autocorrelation function (ACF) for the given MCMC samples, overlaying results from all chains.
 
-plot.ACFs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
+plot.ACFs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, name = NULL) {
   if (name == "Phi") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.triplets <- dim(mcmc.chains[[1]])[2]
@@ -619,22 +853,22 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains, name, num.entities) {
 ## INPUT:
 # num.chains:   Number of MCMC chains;
 # mcmc.chains:  A list of specific MCMC samples from each chain;
-# name:         A string representing the name of parameters;
 # num.entities: Number of entities (e.g., items and players);
+# name:         A string representing the name of parameters;
 # rhat:         Logical flag: if TRUE, compute and print credible intervals (lower and uppper bounds);
 # level:        The credible interval level (e.g., 0.95);
 # hpd:          Logical flag: if TRUE, return the Highest Posterior Density (HPD) interval;
-# decimal:      Number of decimal places.
-# silent.flag:  Logical flag: if FALSE, print the estimated results.
-# null.flag:    Logical flag: if TRUE, sets the posterior mean/median of parameters (grad, curl, M) 
+# decimal:      Number of decimal places;
+# silent.flag:  Logical flag: if FALSE, print the estimated results;
+# null.flag:    Logical flag: if TRUE, sets the posterior mean/median of parameters (grad, curl, M);
 #               to 0 if their credible interval contains 0.
 
 ## OUTPUT:
 # For each chain, prints a data frame of posterior statistics (mean and median) for each parameter.
 
-stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
-                             CI = TRUE, level = 0.95, hpd = TRUE, decimal = 4, 
-                             silent.flag = FALSE, null.flag = FALSE) {
+stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, 
+                             name = NULL, CI = TRUE, level = 0.95, hpd = TRUE, 
+                             decimal = 4, silent.flag = FALSE, null.flag = FALSE) {
   if (name == "Phi") {
     for (chain in 1:num.chains) {
       if (!silent.flag) cat("Chain", chain, "\n")
@@ -862,8 +1096,8 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
 
 ## INPUT:
 # chains:       A list of complete MCMC samples from each chain;
-# name:         A string representing the name of parameters;
 # num.entities: Number of entities (e.g., items and players);
+# name:         A string representing the name of parameters;
 # rhat:         Logical flag: if TRUE, compute and print Rhat values;
 # ess:          Logical flag: if TRUE, compute and print Effective Sample Size (ESS).
 
@@ -871,7 +1105,8 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains, name, num.entities,
 # The extracted MCMC chains for the specified parameter.
 # Prints Rhat and ESS diagnostics for the specified parameter.
 
-mcmc.extract <- function(chains, name, num.entities, rhat = FALSE, ess = FALSE) {
+mcmc.extract <- function(chains = NULL, num.entities = NULL, name = NULL, 
+                         rhat = FALSE, ess = FALSE) {
   mcmc.chains <- lapply(chains, function(chain) chain[[name]])
   num.chains <- length(mcmc.chains)
   
@@ -942,7 +1177,7 @@ mcmc.extract <- function(chains, name, num.entities, rhat = FALSE, ess = FALSE) 
         }
       }
     }
-  } else if (name == "M") {
+  } else if (name == "grad" || name == "curl" || name == "M") {
     mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
     
     ## Compute Gelman-Rubin diagnostic (Rhat) and Effective Sample Size (ESS)
@@ -1043,12 +1278,12 @@ build.hodge_operators <- function(num.entities = NULL, tol = 1e-10) {
   return(outputs)
 }
 
-######################  END Functions for the CBT model  #######################
+##############################  END Subroutines  ###############################
 
 
 
 
-##################  BEGIN Functions for generating true data  ##################
+##################  BEGIN Functions for Generating True Data  ##################
 
 ###------------------------###
 ###    Compute Phi.true    ###
@@ -1185,7 +1420,7 @@ compute.relations.true <- function(num.entities = NULL, s = NULL, Phi = NULL) {
 ## OUTPUT:
 # A matrix with 'M' columns, ready for plot.networks.
 
-compute.M <- function(df) {
+compute.M <- function(df = NULL) {
   ## Preparation
   entities <- sort(unique(c(as.character(df$player1), as.character(df$player2))))
   num.entities <- length(entities)
@@ -1305,12 +1540,12 @@ generate.artificial <- function(num.entities = NULL, s_interval = 0.5, freq.pair
 }
 
 
-##################  BEGIN Functions for generating true data  ##################
+##################  BEGIN Functions for Generating True Data  ##################
 
 
 
 
-########################  BEGIN Visualization functions ########################
+######################  BEGIN Functions for Visualization  #####################
 
 ###---------------------------###
 ###    Plot match networks    ###
@@ -1319,8 +1554,8 @@ generate.artificial <- function(num.entities = NULL, s_interval = 0.5, freq.pair
 ## INPUT:
 # relations:      A matrix or data.frame with columns for 'grad', 'curl', 'M';
 # num.entities:   Number of entities (e.g., items and players);
-# components:     A character vector specifying which columns of relations to plot.
-#                         Defaults: c("grad", "curl", "M").
+# components:     A character vector specifying which columns of relations to plot;
+#                         Defaults: c("grad", "curl", "M");
 # edge.label:     Logical flag: if TRUE, print edge labels as "w_win-w_lose" on the plot;
 # draw.flag:      Logical flag: if TRUE, plot the graph on the plot;
 # layout.coords:  A matrix of coordinates for the graph layout;
@@ -1331,11 +1566,11 @@ generate.artificial <- function(num.entities = NULL, s_interval = 0.5, freq.pair
 # tie_mode:       Character scalar, one of c("skip","thin");
 #                         "skip" drops tied edges; "thin" keeps them.
 
-##OUTPUT
+## OUTPUT
 # An directed graph created from relations.
 # Draws the specified network graphs and invisibly returns a list containing the graph objects.
 
-plot.networks <- function(relations, num.entities = NULL, components = c("grad", "curl", "M"), 
+plot.networks <- function(relations = NULL, num.entities = NULL, components = c("grad", "curl", "M"), 
                           edge.label = FALSE, draw.flag = TRUE, layout.coords = NULL,
                           weight = c("diff", "prop"), layout = c("fr", "circle"), tie_mode = c("skip", "thin")) 
   {
@@ -1474,7 +1709,8 @@ plot.networks <- function(relations, num.entities = NULL, components = c("grad",
 ## OUTPUT:
 # Plots the reversed edges for non-identical graphs.
 
-plot.reversed_edges <- function(graphs.estimated, graphs.true, layout.coords) {
+plot.reversed_edges <- function(graphs.estimated = NULL, graphs.true = NULL, layout.coords = NULL) 
+  {
   ## Helper function to check if two graphs are identical
   are_graphs_identical <- function(g1, g2) {
     el1 <- as_edgelist(g1, names = FALSE)
@@ -1547,4 +1783,4 @@ plot.reversed_edges <- function(graphs.estimated, graphs.true, layout.coords) {
   return(invisible(diff_data))
 }
 
-#########################  END Visualization functions #########################
+######################  END Functions for Visualization  #######################

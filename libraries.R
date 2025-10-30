@@ -3,6 +3,7 @@
 #
 ########################  BEGIN import libraries  ##############################
 
+library(cmdstanr)
 library(BradleyTerry2)
 library(coda)
 library(posterior)

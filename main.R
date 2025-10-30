@@ -1,7 +1,7 @@
 #
 # Sourcing this R file contains 3 parts.
 #
-# import & setting, BradleyTerry2 package, CBT.Gibbs
+# import & setting, MCMC & Visualization, Simulations
 #
 ######################  BEGIN import & setting  ################################
 
@@ -10,12 +10,12 @@ source("functions.R")
 source("database.R")
 
 ## For real-world data.
-#X <- database$citations9
-#entities.name <- database$name9
-#network.true <- database$network.citations9
-#N <- length(entities.name)  # number of entities
-#networks.true <- plot.networks(compute.M(X), num.entities = N, components = c("M"),
-#                               weight = "prop", layout = "circle", tie_mode = "skip")
+# X <- database$citations9
+# entities.name <- database$name9
+# network.true <- database$network.citations9
+# N <- length(entities.name)  # number of entities
+# networks.true <- plot.networks(compute.M(X), num.entities = N, components = c("M"),
+#                                weight = "prop", layout = "circle", tie_mode = "skip")
 
 ## For artificial data.
 N <- 10
@@ -40,92 +40,64 @@ num.burn <- num.iter/5
 ######################  END import & setting  ##################################
 
 
-######################  BEGIN BradleyTerry2 package  ###########################
-
-# Bradley Terry model fits the data
-reference <- entities.name[length(entities.name)] # fix the last entity
-citeModel <- BTm(outcome = cbind(win1, win2), player1, player2, formula = ~player, 
-                 id = "player", refcat = reference,  data = X)
-citeModel$coefficients
-
-# Set up the plotting area
-par(mfrow = c(1, 1), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
-
-# the MLEs of strength parameters and visualization
-# BTabilities(citeModel)
-sorting <- FALSE
-citations.qv <- qvcalc(BTabilities(citeModel))
-if (sorting) {
-  idx <- order(citations.qv$qvframe$estimate, decreasing = TRUE)
-  qvframe.sorted <- citations.qv$qvframe[idx, ]
-  citations.qv.sorted <- citations.qv
-  citations.qv.sorted$qvframe <- qvframe.sorted
-  names.sorted <- rownames(citations.qv$qvframe)[idx]
-  plot(citations.qv.sorted, levelNames = names.sorted) 
-} else {
-  qvframe.sorted <- citations.qv$qvframe[rep(1:N), ]
-  citations.qv.sorted <- citations.qv
-  citations.qv.sorted$qvframe <- qvframe.sorted
-  names.sorted <- rownames(citations.qv$qvframe)[1:N]
-  plot(citations.qv.sorted, levelNames = names.sorted) 
-}
-
-## MSE simulationを追加する
-pairs <- t(combn(N, 2))
-M.BT <- citations.qv.sorted$qvframe$estimate[pairs[,1]] - citations.qv.sorted$qvframe$estimate[pairs[,2]]
-relations.BT <- round(cbind(M.BT, M.BT), 3)
-colnames(relations.BT) <- c("grad", "M")
-network.BT <- plot.networks(relations.BT, num.entities = N, components = c("grad", "M"), 
-                            layout.coords = networks.true$layout,
-                            weight = "prop", layout = "circle", tie_mode = "skip")
-plot.reversed_edges(network.BT$graphs, networks.true$graphs, networks.true$layout)
-
-######################  END BradleyTerry2 package  #############################
 
 
-##############################  BEGIN CBT.Gibbs  ###############################
+#########################  BEGIN MCMC & Visualization  #########################
+
+## Bradley-Terry model
+BT.results <- BT.freq(X, sort.flag = TRUE, desc.flag = TRUE, draw.flag = TRUE, decimal = 3)
 
 ## Prior specification
 num.chains <- 1
-param.name <- "curl"  # Options: (s, weights, Phi, lambda, tau, nu, xi, grad, curl, M)
+model <- "BBT.Stan" # Oprions: (CBT, ICBT, BBT.Stan, BBT.Gibbs)
+param.name <- "s"  # Options: (s, weights, Phi, lambda, tau, nu, xi, grad, curl, M)
 s.prior <- rep(0, N)
 Phi.prior <- rep(0, num.triplets)
 lambda.prior <- rep(1, num.free)
 tau.prior <- 0.5
 nu.prior <- rep(2, num.free)
 xi.prior <- 2
-mcmc.results <- run.MCMCs(num.chains = num.chains, name = param.name, num.entities = N,
+mcmc.results <- run.MCMCs(model = model, num.chains = num.chains, name = param.name, num.entities = N,
                           MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
-                          X, mcmc = num.iter, burn = num.burn, thin = 1,
+                          X, mcmc = num.iter, burn = num.burn, thin = 1, seed = 73,
                           s.prior = s.prior, sigma.prior = 3, Phi.prior = Phi.prior, 
                           lambda.prior = lambda.prior, tau.prior = tau.prior,
                           nu.prior = nu.prior, xi.prior = xi.prior)
 
 ## Extract MCMC sample for specified parameter (name)
-specific.mcmc <- mcmc.extract(mcmc.results$all.mcmc, param.name, N, rhat = FALSE, ess = FALSE)
+specific.mcmc <- mcmc.extract(mcmc.results$all.mcmc, N, param.name, rhat = FALSE, ess = FALSE)
 
 ## Represent information for the posterior of specified parameter.
-plot.MCMCs(num.chains, specific.mcmc, param.name, N)       # plot MCMC sample path
-plot.posteriors(num.chains, specific.mcmc, param.name, N)  # plot MCMC histgram
-plot.ACFs(num.chains, specific.mcmc, param.name, N)        # plot autocorrelation function (ACF)
-specifics.estimates <- stats.posteriors(num.chains, specific.mcmc, param.name, N, 
+plot.MCMCs(num.chains, specific.mcmc, N, param.name)       # plot MCMC sample path
+plot.posteriors(num.chains, specific.mcmc, N, param.name)  # plot MCMC histgram
+plot.ACFs(num.chains, specific.mcmc, N, param.name)        # plot autocorrelation function (ACF)
+specifics.estimates <- stats.posteriors(num.chains, specific.mcmc, N, param.name,
                                         CI = TRUE, level = 0.95, hpd = TRUE, decimal = 3)  # compute the mean, median and sds
 
-## Draw network and check isomorphism
+## Draw network and check differences
 statistic <- "mean" # "median" 
-components <- c("grad", "curl", "M")
+components <- if(model=="CBT") c("grad", "curl", "M") else c("grad", "M")
 list.estimates <- lapply(components, function(comp.name) {
-  stats.posteriors(num.chains, mcmc.extract(mcmc.results$all.mcmc, comp.name, N),
-                   name = comp.name, num.entities = N, decimal = 3,
+  stats.posteriors(num.chains, mcmc.extract(mcmc.results$all.mcmc, N, comp.name),
+                   num.entities = N, name = comp.name,  decimal = 3,
                    silent.flag = TRUE, null.flag = TRUE)
   })
 list.estimates <- lapply(list.estimates, `[[`, statistic)
 relations.estimates <- do.call(cbind, list.estimates)
 colnames(relations.estimates) <- components
 network.estimates <- plot.networks(relations.estimates, num.entities = N,
-                                   components = c("grad", "curl", "M"), 
+                                   components = components, 
                                    layout.coords = networks.true$layout,
                                    weight = "prop", layout = "circle", tie_mode = "skip")
 plot.reversed_edges(network.estimates$graphs, networks.true$graphs, networks.true$layout)
 
-############=################  END TDBT.Gibbs  ##################################
+##########################  END MCMC & Visualization  ##########################
+
+
+
+
+#############################  BEGIN Simulations  ##############################
+
+
+
+##############################  END Simulations  ###############################
