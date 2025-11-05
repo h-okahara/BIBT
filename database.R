@@ -6,9 +6,9 @@
 #
 #########################  BEGIN import database  ##############################
 
-###---------------------------------------###
-###        Import real-world data         ###
-###---------------------------------------###
+###------------------------###
+###    Import Real Data    ###
+###------------------------###
 
 # Import from BradleyTerry2 package
 data(citations)
@@ -212,6 +212,5 @@ database$sushiA$n_ij <- database$sushiA$win1 + database$sushiA$win2
 database$sushiA$y_ij <- database$sushiA$win1
 database$network.sushiA <- plot.networks(compute.M(database$sushiA), num.entities = 10, components = c("M"), 
                                          draw.flag = FALSE, weight = "prop", layout = "fr", tie_mode = "thin")
-
 
 ##########################  END import database  ###############################

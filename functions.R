@@ -3,25 +3,27 @@
 # of the following 15 functions:
 #
 # - For Constructing Each Model:
-#     CBT.Gibbs, BT.freq, BBT.Gibbs, ICBT.Gibbs
+#     CBT.cpp, CBT.R, BBT.cpp, BBT.R, BBT.Stan, BT.freq;
 # - For Running MCMC:
 #     run.MCMCs, plot.MCMCs, plot.posteriors, plot.ACFs, stats.posteriors, mcmc.extract, build.hodge_operators;
-# - For Generating True Data:
-#     compute.Phi.true, compute.spPhi.true, compute.relations.true, compute.M, generate.comparisons;
+# - For Simulations:
+#     compute.Phi.true, compute.spPhi.true, compute.relations.true, compute.M, generate.artificial.data,
+#     generate.simulation.datasets, 
 # - For Visualization:
 #     plot.networks, plot.reversed_edges.
 #
 ######################  BEGIN Functions for each models  #######################
 
-###----------------------------------------###
-###    Cyclic Bradley-Terry (CBT) model    ###
-###----------------------------------------###
+###-----------------------------------------------###
+###    Cyclic Bradley-Terry (CBT) Model in C++    ###
+###-----------------------------------------------###
 
 ## INPUT:
 # X:            An N×N matrix where the (i,j) entry indicates that player i defeats player j;
 # mcmc:         Number of iterations;
 # burn:         Burn-in period;
 # thin:         A thinning interval;
+# operators:    A list containing basis matrices (G, C.ast, H, A);
 # s.prior:      A N×1 vector representing the score of each subject;
 # sigma.prior:  A scalar representing variance of score s_t for t=1,...,N;
 # Phi.prior:    A num.triplets×1 vector representing the triangular parameters;
@@ -33,10 +35,139 @@
 ## OUTPUT:
 # A list of MCMC samples for the parameters: omega, s, Phi, lambda, tau, nu, xi, grad, curl, M.
 
-CBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1,
-                      s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL,
-                      lambda.prior = NULL, tau.prior = NULL, 
-                      nu.prior = NULL, xi.prior = NULL) {
+CBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
+                          s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL,
+                          lambda.prior = NULL, tau.prior = NULL, 
+                          nu.prior = NULL, xi.prior = NULL) 
+  {
+  ## Preparation
+  entity.name <- unique(c(X$player1, X$player2))
+  N <- length(entity.name)  # number of entities
+  pairs <- t(combn(N, 2))
+  triplets <- t(combn(1:N, 3))
+  num.pairs <- nrow(pairs)      # number of unique (i,j) pairs
+  num.triplets <- nrow(triplets) # number of unique (i,j,k) triplets
+  num.free <- choose(N-1, 2)
+  
+  ## Initial values
+  omega <- rep(0, num.pairs)
+  kappa <- X$y_ij - X$n_ij/2
+  s      <- if(is.null(s.prior))  rep(0, N) else s.prior
+  sigma  <- if(is.null(sigma.prior))  1 else sigma.prior
+  Phi    <- if(is.null(Phi.prior))  rep(0, num.triplets)  else Phi.prior
+  lambda <- if(is.null(lambda.prior)) rep(1, num.free) else lambda.prior
+  tau    <- if(is.null(tau.prior))  1  else tau.prior
+  nu     <- if(is.null(nu.prior)) rep(1, num.free) else nu.prior
+  xi     <- if(is.null(xi.prior)) 1 else xi.prior
+  
+  ## Build operators
+  if(is.null(operators)) operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
+  G <- operators$G
+  C.ast <- operators$C.ast
+  H <- operators$H
+  D.ast <- C.ast %*% H
+  D.ast_t <- t(D.ast)
+  
+  ## MCMC Sampling using C++
+  result.cpp <- CBT_Gibbs_cpp(mcmc = mcmc, burn = burn, thin = thin, 
+                              n_ij = X$n_ij, kappa = kappa, G = G, C_ast = C.ast, H = H, 
+                              D_ast = as.matrix(D.ast), D_ast_t = as.matrix(D.ast_t), 
+                              num_entities = N, num_pairs = num.pairs, num_triplets = num.triplets, num_free = num.free, 
+                              s = s, sigma = sigma, Phi = Phi, 
+                              lambda = lambda, tau = tau, nu = nu, xi = xi)
+  
+  result <- list(s = result.cpp$s,
+                 weights = result.cpp$weights,
+                 Phi = result.cpp$Phi,
+                 lambda = result.cpp$lambda,
+                 tau = as.matrix(result.cpp$tau),
+                 nu = result.cpp$nu,
+                 xi = as.matrix(result.cpp$xi),
+                 grad = result.cpp$grad,
+                 curl = result.cpp$curl,
+                 M = result.cpp$M)
+  return(result)
+}
+
+
+
+
+###-------------------------------------------------###
+###    Bayesian Bradley-Terry (BBT) Model in C++    ###
+###-------------------------------------------------###
+
+## INPUT:
+# X:            An N×N matrix where the (i,j) entry indicates that player i defeats player j;
+# mcmc:         Number of iterations;
+# burn:         Burn-in period;
+# thin:         A thinning interval;
+# operators:    A list containing basis matrices (G, C.ast, H, A);
+# s.prior:      A N×1 vector representing the score of each subject;
+# sigma.prior:  A scalar representing variance of score s_t for t=1,...,N;
+
+## OUTPUT:
+# A list of MCMC samples for the parameters: omega, s, grad, M.
+
+BBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
+                          s.prior = NULL, sigma.prior = NULL) 
+  {
+  ## Preparation
+  entity.name <- unique(c(X$player1, X$player2))
+  N <- length(entity.name)  # number of entities
+  pairs <- t(combn(N, 2))
+  num.pairs <- nrow(pairs)      # number of unique (i,j) pairs
+  
+  ## Initial values
+  omega <- rep(0, num.pairs)
+  kappa <- X$y_ij - X$n_ij/2
+  s      <- if(is.null(s.prior))  rep(0, N) else s.prior
+  sigma  <- if(is.null(sigma.prior))  1 else sigma.prior
+  
+  ## Build operators
+  if(is.null(operators)) operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
+  G <- operators$G
+  
+  ## MCMC Sampling using C++
+  result.cpp <- BBT_Gibbs_cpp(mcmc = mcmc, burn = burn, thin = thin, 
+                              n_ij = X$n_ij, kappa = kappa, G = G, 
+                              num_entities = N, num_pairs = num.pairs,
+                              s = s, sigma = sigma)
+  
+  result <- list(s = result.cpp$s,
+                 grad = result.cpp$grad,
+                 M = result.cpp$M)
+  return(result)
+}
+ 
+ 
+
+
+###---------------------------------------------###
+###    Cyclic Bradley-Terry (CBT) Model in R    ###
+###---------------------------------------------###
+
+## INPUT:
+# X:            An N×N matrix where the (i,j) entry indicates that player i defeats player j;
+# mcmc:         Number of iterations;
+# burn:         Burn-in period;
+# thin:         A thinning interval;
+# operators:    A list containing basis matrices (G, C.ast, H, A);
+# s.prior:      A N×1 vector representing the score of each subject;
+# sigma.prior:  A scalar representing variance of score s_t for t=1,...,N;
+# Phi.prior:    A num.triplets×1 vector representing the triangular parameters;
+# lambda.prior: A num.free×1 vector representing the local-shrinkage parameters;
+# tau.prior:    A scalar representing the global-shrinkage parameters;
+# nu.prior:     A num.free×1 vector representing the scalar of lambda.prior;
+# xi.prior:     A scalar representing the scalar of tau.prior.
+
+## OUTPUT:
+# A list of MCMC samples for the parameters: omega, s, Phi, lambda, tau, nu, xi, grad, curl, M.
+
+CBT.Gibbs.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
+                        s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL,
+                        lambda.prior = NULL, tau.prior = NULL, 
+                        nu.prior = NULL, xi.prior = NULL) 
+  {
   ## Preparation
   entity.name <- unique(c(X$player1, X$player2))
   N <- length(entity.name)  # number of entities
@@ -58,11 +189,10 @@ CBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1,
   xi     <- if(is.null(xi.prior)) 1 else xi.prior
   
   ## Build operators
-  operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
+  if(is.null(operators)) operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
   G <- operators$G  # G = grad (num.pairs x N)
   C.ast <- operators$C.ast  # C.ast = curl* (num.pairs x num.triplets)
   H <- operators$H  # column space basis
-  #A <- operators$A  # kernel space basis
   D.ast <- C.ast %*% H
   D.ast_t <- t(D.ast)
   
@@ -72,7 +202,7 @@ CBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1,
   M.vec <- grad.flow + curl.flow
   
   ## Define matrices for posterior samples
-  mcmc.row  <- ((mcmc-burn) - (mcmc-burn) %% thin) / thin
+  mcmc.row <- as.integer((mcmc-burn) / thin)
   s.pos         <- matrix(0, nrow = mcmc.row, ncol = N)
   weights.pos   <- matrix(0, nrow = mcmc.row, ncol = num.free)
   Phi.pos       <- matrix(0, nrow = mcmc.row, ncol = num.triplets)
@@ -136,7 +266,6 @@ CBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1,
     xi <- 1/rgamma(1, shape = 1, rate = b_xi)
     
     ## Updating other parameters
-    #W.vec <- c(tau^2 * lambda^2, rep(varepsilon^2, num.kernel))
     grad.flow <- as.vector(G %*% s)
     curl.flow <- as.vector(C.ast %*% Phi)
     M.vec <- grad.flow + curl.flow
@@ -171,7 +300,7 @@ CBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1,
 
 
 ##---------------------------------------------------------------------###
-###    Bayesian Bradley-Terry (BBT) model with PG data augmentation    ###
+###    Bayesian Bradley-Terry (BBT) Model with PG Data Augmentation    ###
 ###--------------------------------------------------------------------###
 
 ## INPUT:
@@ -179,13 +308,14 @@ CBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1,
 # mcmc:         Number of iterations;
 # burn:         Burn-in period;
 # thin:         A thinning interval;
+# operators:    A list containing basis matrices (G, C.ast, H, A);
 # s.prior:      A N×1 vector representing the score of each subject;
 # sigma.prior:  A scalar representing variance of score s_t for t=1,...,N.
 
 ## OUTPUT:
 # A list of MCMC samples for the parameters: omega, s, grad, M.
 
-BBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1, 
+BBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
                       s.prior = NULL, sigma.prior = NULL) {
   ## Preparation
   entity.name <- unique(c(X$player1, X$player2))
@@ -200,12 +330,12 @@ BBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1,
   sigma  <- if(is.null(sigma.prior))  1 else sigma.prior
   
   ## Build operators
-  operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
+  if(is.null(operators)) operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
   G <- operators$G  # G = grad (num.pairs x N)
   M.vec <- as.vector(G %*% s) # Match-up function: 
   
   ## Define matrices for posterior samples
-  mcmc.row  <- ((mcmc-burn) - (mcmc-burn) %% thin) / thin
+  mcmc.row  <- as.integer((mcmc-burn) / thin)
   s.pos     <- matrix(0, nrow = mcmc.row, ncol = N)
   M.pos     <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
   
@@ -250,7 +380,7 @@ BBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1,
 
 
 ###--------------------------------------------------------###
-###    Bayesian Bradley-Terry (BT) model (Wainer,2023)    ###
+###    Bayesian Bradley-Terry (BT) Model (Wainer,2023)    ###
 ###--------------------------------------------------------###
 
 ## INPUT:
@@ -259,25 +389,22 @@ BBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1,
 # mcmc:         Number of iterations;
 # burn:         Burn-in period;
 # thin:         A thinning interval;
-# hyper_prior:  The code of the hyper-prior for the sigma
-#     * 0 = lognormal(0.5) - the default,
-#     * 1 = lognormal(scale),
-#     * 2 = cauchy(scale),
-#     * 3 = normal(scale)
-# scale:        The scale of the hyper prior for the sigma parameter
+# operators:    A list containing basis matrices (G, C.ast, H, A);
+# seed:         Integer: Random seed for reproducibility.
 
 ## OUTPUT:
 # A list of MCMC samples for the parameters: s, sigma, grad, M.
 
-BBT.Stan <- function(X, num.chains = 1, mcmc = 10000, burn = 2000, thin = 1, seed = 73) {
+BBT.Stan <- function(X, num.chains = 1, mcmc = 10000, burn = 2000, thin = 1,
+                     operators = NULL, seed = 73) {
   ## Preparation
   entity.name <- unique(c(X$player1, X$player2))
-  N <- length(entities.name) # number of entities
+  N <- length(entity.name) # number of entities
   num.pairs <- nrow(X)                  # number of pairs
-  player1_id <- match(X$player1, entities.name)
-  player2_id <- match(X$player2, entities.name)
-  operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
-  G <- operators$G  # G = grad (num.pairs x )
+  player1_id <- match(X$player1, entity.name)
+  player2_id <- match(X$player2, entity.name)
+  if(is.null(operators)) operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
+  G <- operators$G
   
   ## Create dataset for Stan
   data <- list(num_entities = N, 
@@ -293,7 +420,7 @@ BBT.Stan <- function(X, num.chains = 1, mcmc = 10000, burn = 2000, thin = 1, see
   dir.create(outdir, showWarnings = FALSE)
   
   ## Define the Bayesian Bradley-Terry (BBT) model in Stan
-  model <- cmdstan_model("bbt.stan", dir = outdir)
+  model <- cmdstan_model("BBT.stan", dir = outdir)
   fit <- model$sample(
     data = data,
     refresh = 0,
@@ -310,9 +437,9 @@ BBT.Stan <- function(X, num.chains = 1, mcmc = 10000, burn = 2000, thin = 1, see
     s.pos <- matrix(samples.pos[ , chain.id, paste0('s[', 1:N, ']')], ncol = N)
     s.pos <- s.pos - rowMeans(s.pos)
     sigma.pos <- matrix(samples.pos[ , chain.id, 'sigma'], ncol = 1)
-    grad.pos <- M.pos <- matrix(samples.pos[ , chain.id, paste0('M[', 1:num.pairs, ']')], ncol = num.pairs)
+    M.pos <- matrix(samples.pos[ , chain.id, paste0('M[', 1:num.pairs, ']')], ncol = num.pairs)
     
-    return(list(s = s.pos, sigma = sigma.pos, grad = grad.pos, M = M.pos))
+    list(s = s.pos, sigma = sigma.pos, grad = M.pos, M = M.pos)
   })
   return(chains)
 }
@@ -320,7 +447,7 @@ BBT.Stan <- function(X, num.chains = 1, mcmc = 10000, burn = 2000, thin = 1, see
 
 
 ###--------------------------------###
-###    Bradley-Terry (BT) model    ###
+###    Bradley-Terry (BT) Model    ###
 ###--------------------------------###
 
 ## INPUT:
@@ -335,10 +462,11 @@ BBT.Stan <- function(X, num.chains = 1, mcmc = 10000, burn = 2000, thin = 1, see
 # Draws the specified network graphs and invisibly returns a list containing the graph objects.
 
 BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE, draw.flag = FALSE, decimal = 3) {
+  start.time <- Sys.time()
   ## Preparation
   entity.name <- unique(c(X$player1, X$player2))
   N <- length(entity.name)  # number of entities
-  reference <- entities.name[N] # fix the last entity
+  reference <- entity.name[N] # fix the last entity
   citeModel <- BTm(data = X, outcome = cbind(win1, win2), player1, player2,
                    formula = ~player, id = "player", refcat = reference)
   
@@ -374,6 +502,8 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE, draw.flag = FALSE, de
   
   output <- list(s = citations.qv$qvframe$estimate, M = M.BT,
                  graphs = network.BT$graphs, layout = network.BT$layout)
+  
+  print(paste("Total runtime: ", round(difftime(Sys.time(), start.time, units = "sec"), 3), "seconds"))
   return(invisible(output))
 }
 
@@ -386,12 +516,12 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE, draw.flag = FALSE, de
 #############################  BEGIN Subroutines  ##############################
 
 ###-----------------------------------------###
-###    Run Multiple MCMCs for each model    ###
+###    Run Multiple MCMCs for Each Model    ###
 ###-----------------------------------------###
 
 ## INPUT:
 # model:        A character vector specifying which model to run MCMC.
-#                         Defaults: c("BBT", "ICBT", "CBT");
+#               Defaults: c("CBT.cpp", "CBT.R", "BBT.cpp", "BBT.R", "BBT.Stan");
 # num.chains:   Number of independent MCMC chains to run;
 # num.entities: Number of entities (e.g., items and players).
 # name:         A string representing the name of parameters;
@@ -414,24 +544,44 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE, draw.flag = FALSE, de
 ## OUTPUT:
 # A list of MCMC draws from multiple chains.
 
-run.MCMCs <- function(model = c("BBT.Stan","BBT.Gibbs","ICBT","CBT"), num.chains = 1, 
-                      num.entities = NULL, name = NULL, MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
+run.MCMCs <- function(model = c("CBT.cpp", "CBT.R", "BBT.cpp", "BBT.R", "BBT.Stan"), 
+                      num.chains = 1, num.entities = NULL, name = NULL, 
+                      MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
                       X, mcmc = 10000, burn = 2000, thin = 1, seed = 73,
                       s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL, 
                       tau.prior = NULL, lambda.prior = NULL, 
                       nu.prior = NULL, xi.prior = NULL) {
   start.time <- Sys.time()
   
+  if(!model %in% c("CBT.cpp", "CBT.R", "BBT.cpp", "BBT.R", "BBT.Stan")) {
+    stop(paste(model, "must be in (CBT.cpp, CBT.R, BBT.cpp, BBT.R, BBT.Stan)."))
+  }
+  
   ## Run multiple MCMC chains for each model
-  if (model == "CBT") {
+  if (model == "CBT.cpp") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
-      CBT.Gibbs(X, mcmc = mcmc, burn = burn, thin = thin,
-                s.prior = s.prior, sigma.prior = sigma.prior, Phi.prior = Phi.prior, 
-                tau.prior = tau.prior, lambda.prior = lambda.prior, 
-                nu.prior = nu.prior, xi.prior = xi.prior)
+      CBT.Gibbs.cpp(X, mcmc = mcmc, burn = burn, thin = thin, 
+                    s.prior = s.prior, sigma.prior = sigma.prior, Phi.prior = Phi.prior, 
+                    tau.prior = tau.prior, lambda.prior = lambda.prior, 
+                    nu.prior = nu.prior, xi.prior = xi.prior)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
-  } else if (model == "BBT.Gibbs") {
+  } else if (model == "CBT.R") {
+    chains <- parallel::mclapply(1:num.chains, function(chain.id) {
+      set.seed(seed + chain.id)
+      CBT.Gibbs.R(X, mcmc = mcmc, burn = burn, thin = thin,
+                  s.prior = s.prior, sigma.prior = sigma.prior, Phi.prior = Phi.prior, 
+                  tau.prior = tau.prior, lambda.prior = lambda.prior, 
+                  nu.prior = nu.prior, xi.prior = xi.prior)
+    }, mc.cores = min(num.chains, parallel::detectCores()-1))
+  } else if (model == "BBT.cpp") {
+    chains <- parallel::mclapply(1:num.chains, function(chain.id) {
+      set.seed(seed + chain.id)
+      BBT.Gibbs.cpp(X, mcmc = mcmc, burn = burn, thin = thin,
+                    s.prior = s.prior, sigma.prior = sigma.prior)
+    }, mc.cores = min(num.chains, parallel::detectCores()-1))
+  }
+  else if (model == "BBT.R") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
       BBT.Gibbs(X, mcmc = mcmc, burn = burn, thin = thin,
@@ -459,9 +609,9 @@ run.MCMCs <- function(model = c("BBT.Stan","BBT.Gibbs","ICBT","CBT"), num.chains
 
 
 
-###-------------------------###
-###    MCMC sample paths    ###
-###-------------------------###
+###------------------------------###
+###    Plot MCMC Sample Paths    ###
+###------------------------------###
 
 ## INPUT:
 # num.chains:   Number of MCMC chains;
@@ -492,6 +642,28 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, 
       if (num.chains > 1) {
         for (i in 2:num.chains) {
           lines(1:mcmc, mcmc.chains[[i]][, idx], col = i)
+        }
+      }
+    }
+    mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
+  } else if (name == "grad" || name == "curl" || name == "M") {
+    mcmc <- nrow(mcmc.chains[[1]])
+    pairs <- t(combn(num.entities, 2))
+    num.pairs <- nrow(pairs)
+    if(ncol(mcmc.chains[[1]])!=num.pairs){stop("Number of pairs is not equal to the length of M")}
+    
+    ## Set up the plotting area
+    par(mfrow = c(1, num.pairs), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
+    
+    ## Loop over each pair to plot MCMC paths
+    for (p in 1:num.pairs) {
+      plot(1:mcmc, mcmc.chains[[1]][, p], type = "l", col = 1,
+           xlab = "Iteration", ylab = "", main = paste0(name, "_", pairs[p,1], pairs[p,2]))
+      
+      # Overlay traces for remaining chains
+      if (num.chains > 1) {
+        for (i in 2:num.chains) {
+          lines(1:mcmc, mcmc.chains[[i]][, p], col = i)
         }
       }
     }
@@ -537,28 +709,6 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, 
       }
     }
     mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "grad" || name == "curl" || name == "M") {
-    mcmc <- nrow(mcmc.chains[[1]])
-    pairs <- t(combn(num.entities, 2))
-    num.pairs <- nrow(pairs)
-    if(ncol(mcmc.chains[[1]])!=num.pairs){stop("Number of pairs is not equal to the length of M")}
-    
-    ## Set up the plotting area
-    par(mfrow = c(1, num.pairs), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
-    
-    ## Loop over each pair to plot MCMC paths
-    for (p in 1:num.pairs) {
-      plot(1:mcmc, mcmc.chains[[1]][, p], type = "l", col = 1,
-           xlab = "Iteration", ylab = "", main = paste0(name, "_", pairs[p,1], pairs[p,2]))
-      
-      # Overlay traces for remaining chains
-      if (num.chains > 1) {
-        for (i in 2:num.chains) {
-          lines(1:mcmc, mcmc.chains[[i]][, p], col = i)
-        }
-      }
-    }
-    mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
   } else {
     mcmc <- nrow(mcmc.chains[[1]])
     
@@ -580,9 +730,9 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, 
 
 
 
-###---------------------------###
-###    Posterior Histogram    ###
-###---------------------------###
+###--------------------------------###
+###    Plot Posterior Histogram    ###
+###--------------------------------###
 
 ## INPUT:
 # num.chains:   Number of MCMC chains;
@@ -618,6 +768,30 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains = NULL,
         }
       } else {
         lines(density(mcmc.chains[[1]][, idx]), col = 1, lwd = 2)
+      }
+    }
+    mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
+  } else if (name == "grad" || name == "curl" || name == "M") {
+    mcmc <- nrow(mcmc.chains[[1]])
+    pairs <- t(combn(num.entities, 2))
+    num.pairs <- nrow(pairs)
+    if(ncol(mcmc.chains[[1]])!=num.pairs){stop("Number of pairs is not equal to the length of M")}
+    
+    ## Set up the plotting area
+    par(mfrow = c(1, num.pairs), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
+    
+    ## Loop over each pair to plot histogram with density curve
+    for (p in 1:num.pairs) {
+      hist(mcmc.chains[[1]][, p], breaks = bins, col = "skyblue", border = "white", probability = TRUE,
+           xlab = name, main = paste0(name, "_", pairs[p,1], pairs[p,2]))
+      
+      # Overlay density curves from all chains
+      if (num.chains > 1) {
+        for (i in 1:num.chains) {
+          lines(density(mcmc.chains[[i]][, p]), col = i, lwd = 2)
+        }
+      } else {
+        lines(density(mcmc.chains[[1]][, p]), col = 1, lwd = 2)
       }
     }
     mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
@@ -663,30 +837,6 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains = NULL,
         }
       } else {
         lines(density(mcmc.chains[[1]][, n]), col = 1, lwd = 2)
-      }
-    }
-    mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "grad" || name == "curl" || name == "M") {
-    mcmc <- nrow(mcmc.chains[[1]])
-    pairs <- t(combn(num.entities, 2))
-    num.pairs <- nrow(pairs)
-    if(ncol(mcmc.chains[[1]])!=num.pairs){stop("Number of pairs is not equal to the length of M")}
-    
-    ## Set up the plotting area
-    par(mfrow = c(1, num.pairs), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
-    
-    ## Loop over each pair to plot histogram with density curve
-    for (p in 1:num.pairs) {
-      hist(mcmc.chains[[1]][, p], breaks = bins, col = "skyblue", border = "white", probability = TRUE,
-           xlab = name, main = paste0(name, "_", pairs[p,1], pairs[p,2]))
-      
-      # Overlay density curves from all chains
-      if (num.chains > 1) {
-        for (i in 1:num.chains) {
-          lines(density(mcmc.chains[[i]][, p]), col = i, lwd = 2)
-        }
-      } else {
-        lines(density(mcmc.chains[[1]][, p]), col = 1, lwd = 2)
       }
     }
     mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
@@ -752,6 +902,30 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, n
       }
     }
     mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
+  } else if (name == "grad" || name == "curl" || name == "M") {
+    mcmc <- nrow(mcmc.chains[[1]])
+    pairs <- t(combn(num.entities, 2))
+    num.pairs <- nrow(pairs)
+    if(ncol(mcmc.chains[[1]])!=num.pairs){stop("Number of pairs is not equal to the length of M")}
+    
+    ## Set up the plotting area
+    par(mfrow = c(1, num.pairs), mar = c(1, 2, 1.5, 1), oma = c(1, 1, 2, 1))
+    
+    ## Loop over each pair
+    for (p in 1:num.pairs) {
+      acf.base <- acf(mcmc.chains[[1]][, p], plot = FALSE)
+      plot(acf.base, col = 1)
+      title(main = paste0(name, "_", pairs[p,1], pairs[p,2]))
+      
+      # Overlay ACF lines from remaining chains
+      if (num.chains > 1) {
+        for (i in 2:num.chains) {
+          acf.chain <- acf(mcmc.chains[[i]][, p], plot = FALSE)
+          lines(acf.chain$lag, acf.chain$acf, col = i, lwd = 2)
+        }
+      }
+    }
+    mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
   } else if (name == "weights" || name == "lambda" || name == "nu") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.free <- dim(mcmc.chains[[1]])[2]
@@ -797,30 +971,6 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, n
       }
     }
     mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "M") {
-    mcmc <- nrow(mcmc.chains[[1]])
-    pairs <- t(combn(num.entities, 2))
-    num.pairs <- nrow(pairs)
-    if(ncol(mcmc.chains[[1]])!=num.pairs){stop("Number of pairs is not equal to the length of M")}
-    
-    ## Set up the plotting area
-    par(mfrow = c(1, num.pairs), mar = c(1, 2, 1.5, 1), oma = c(1, 1, 2, 1))
-    
-    ## Loop over each pair
-    for (p in 1:num.pairs) {
-      acf.base <- acf(mcmc.chains[[1]][, p], plot = FALSE)
-      plot(acf.base, col = 1)
-      title(main = paste0(name, "_", pairs[p,1], pairs[p,2]))
-      
-      # Overlay ACF lines from remaining chains
-      if (num.chains > 1) {
-        for (i in 2:num.chains) {
-          acf.chain <- acf(mcmc.chains[[i]][, p], plot = FALSE)
-          lines(acf.chain$lag, acf.chain$acf, col = i, lwd = 2)
-        }
-      }
-    }
-    mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
   } else {
     mcmc <- nrow(mcmc.chains[[1]])
     
@@ -851,24 +1001,25 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, n
 ###------------------------------------###
 
 ## INPUT:
-# num.chains:   Number of MCMC chains;
-# mcmc.chains:  A list of specific MCMC samples from each chain;
-# num.entities: Number of entities (e.g., items and players);
-# name:         A string representing the name of parameters;
-# rhat:         Logical flag: if TRUE, compute and print credible intervals (lower and uppper bounds);
-# level:        The credible interval level (e.g., 0.95);
-# hpd:          Logical flag: if TRUE, return the Highest Posterior Density (HPD) interval;
-# decimal:      Number of decimal places;
-# silent.flag:  Logical flag: if FALSE, print the estimated results;
-# null.flag:    Logical flag: if TRUE, sets the posterior mean/median of parameters (grad, curl, M);
-#               to 0 if their credible interval contains 0.
+# num.chains:     Number of MCMC chains;
+# mcmc.chains:    A list of specific MCMC samples from each chain;
+# num.entities:   Number of entities (e.g., items and players);
+# name:           A string representing the name of parameters;
+# rhat:           Logical flag: if TRUE, compute and print credible intervals (lower and uppper bounds);
+# level:          The credible interval level (e.g., 0.95);
+# hpd:            Logical flag: if TRUE, return the Highest Posterior Density (HPD) interval;
+# decimal:        Number of decimal places;
+# silent.flag:    Logical flag: if FALSE, print the estimated results;
+# null.relations: Logical flag: if TRUE, sets the posterior mean/median of parameter 'curl';
+#                 to 0 if their credible interval contains 0.
 
 ## OUTPUT:
 # For each chain, prints a data frame of posterior statistics (mean and median) for each parameter.
 
 stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, 
-                             name = NULL, CI = TRUE, level = 0.95, hpd = TRUE, 
-                             decimal = 4, silent.flag = FALSE, null.flag = FALSE) {
+                             name = NULL, CI = TRUE, level = 0.95, hpd = TRUE, decimal = NULL, 
+                             silent.flag = FALSE, null.relations = c("grad", "curl", "M")) 
+  {
   if (name == "Phi") {
     for (chain in 1:num.chains) {
       if (!silent.flag) cat("Chain", chain, "\n")
@@ -904,95 +1055,16 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
                                             triplets[,1], 
                                             triplets[,2], 
                                             triplets[,3]),
-                          Mean     = round(means, decimal),
-                          Median   = round(medians, decimal),
-                          SD       = round(sds, decimal),
+                          Mean     = ifelse(!is.null(decimal), round(means, decimal), means),
+                          Median   = ifelse(!is.null(decimal), round(medians, decimal), medians),
+                          SD       = ifelse(!is.null(decimal), round(sds, decimal), sds),
                           CI       = if (CI) CI.str else NA_character_, check.names = FALSE
       )
       if (!silent.flag) print(stats, row.names = FALSE)
       if (!silent.flag) cat("----------------------------\n")
     }
-    outputs <- list(mean = round(means, decimal), median = round(medians, decimal))
-    return(outputs)
-  } else if (name == "weights" || name == "lambda" || name == "nu") {
-    for (chain in 1:num.chains) {
-      if (!silent.flag) cat("Chain", chain, "\n")
-      mcmc <- dim(mcmc.chains[[chain]])[1]
-      num.free <- dim(mcmc.chains[[chain]])[2]
-      
-      ## Compute the mean and median
-      means <- apply(mcmc.chains[[chain]], 2, mean)
-      medians <- apply(mcmc.chains[[chain]], 2, median)
-      sds <- apply(mcmc.chains[[chain]], 2, sd)
-      
-      ## Compute credible intervals for each parameter
-      if (CI) {
-        if (hpd) {
-          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
-          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
-          lower <- hpd.int[ , "lower"]
-          upper <- hpd.int[ , "upper"]
-        } else {
-          pr <- c((1-level)/2, 1-(1-level)/2)
-          q  <- apply(mcmc.chains[[chain]], 2, stats::quantile, probs = pr, names = FALSE)
-          lower <- q[1, ]
-          upper <- q[2, ]
-        }
-        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
-      } else {
-        CI.str <- NULL
-      }
-      
-      stats <- data.frame(Variable = paste0(name, "_", 1:num.free),
-                          Mean     = round(means, decimal),
-                          Median   = round(medians, decimal),
-                          SD       = round(sds, decimal),
-                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
-      )
-      if (!silent.flag) print(stats, row.names = FALSE)
-      if (!silent.flag) cat("----------------------------\n")
-    }
-    outputs <- list(mean = round(means, decimal), median = round(medians, decimal))
-    return(outputs)
-  } else if (name == "s") {
-    for (chain in 1:num.chains) {
-      if (!silent.flag) cat("Chain", chain, "\n")
-      mcmc <- nrow(mcmc.chains[[chain]])
-      if(ncol(mcmc.chains[[chain]])!=num.entities){stop("Number of num.entities is not equal to the length of s")}
-      
-      ## Compute the mean and median
-      means <- apply(mcmc.chains[[chain]], 2, mean)
-      medians <- apply(mcmc.chains[[chain]], 2, median)
-      sds <- apply(mcmc.chains[[chain]], 2, sd)
-      
-      ## Compute credible intervals for each parameter
-      if (CI) {
-        if (hpd) {
-          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
-          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
-          lower <- hpd.int[ , "lower"]
-          upper <- hpd.int[ , "upper"]
-        } else {
-          pr <- c((1-level)/2, 1-(1-level)/2)
-          q  <- apply(mcmc.chains[[chain]], 2, stats::quantile, probs = pr, names = FALSE)
-          lower <- q[1, ]
-          upper <- q[2, ]
-        }
-        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
-      } else {
-        CI.str <- NULL
-      }
-      
-      stats <- data.frame(Variable = paste0(name, "_", 1:num.entities),
-                          Mean     = round(means, decimal),
-                          Median   = round(medians, decimal),
-                          SD       = round(sds, decimal),
-                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
-      )
-      if (!silent.flag) print(stats, row.names = FALSE)
-      if (!silent.flag) cat("----------------------------\n")
-    }
-    outputs <- list(mean = round(means, decimal), median = round(medians, decimal))
+    outputs <- list(mean = ifelse(!is.null(decimal), round(means, decimal), means), 
+                    median = ifelse(!is.null(decimal), round(medians, decimal), medians))
     return(outputs)
   } else if (name == "grad" || name == "curl" || name == "M") {
     for (chain in 1:num.chains) {
@@ -1026,24 +1098,107 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
       }
       
       stats <- data.frame(Variable = paste0(name, "_", pairs[,1], pairs[,2]),
-                          Mean     = round(means, decimal),
-                          Median   = round(medians, decimal),
-                          SD       = round(sds, decimal),
+                          Mean     = ifelse(!is.null(decimal), round(means, decimal), means),
+                          Median   = ifelse(!is.null(decimal), round(medians, decimal), medians),
+                          SD       = ifelse(!is.null(decimal), round(sds, decimal), sds),
                           CI       = if (CI) CI.str else NA_character_, check.names = FALSE
       )
       if (!silent.flag) print(stats, row.names = FALSE)
       if (!silent.flag) cat("----------------------------\n")
     }
-
+    
     # Find indices where the credible interval includes 0 (i.e., lower < 0 and upper > 0)
-    if (null.flag && CI) {
-      null_indices <- which(lower < 0 & upper > 0)
+    if (name %in% null.relations && CI) {
+      null.idx <- which(lower < 0 & upper > 0)
       
       # Set their returned mean and median to 0
-      if (length(null_indices) > 0) means[null_indices] <- medians[null_indices] <- 0
+      if (length(null.idx) > 0) means[null.idx] <- medians[null.idx] <- 0
     }
     
-    outputs <- list(mean = round(means, decimal), median = round(medians, decimal))
+    outputs <- list(mean = ifelse(!is.null(decimal), round(means, decimal), means), 
+                    median = ifelse(!is.null(decimal), round(medians, decimal), medians))
+    return(outputs)
+  } else if (name == "weights" || name == "lambda" || name == "nu") {
+    for (chain in 1:num.chains) {
+      if (!silent.flag) cat("Chain", chain, "\n")
+      mcmc <- dim(mcmc.chains[[chain]])[1]
+      num.free <- dim(mcmc.chains[[chain]])[2]
+      
+      ## Compute the mean and median
+      means <- apply(mcmc.chains[[chain]], 2, mean)
+      medians <- apply(mcmc.chains[[chain]], 2, median)
+      sds <- apply(mcmc.chains[[chain]], 2, sd)
+      
+      ## Compute credible intervals for each parameter
+      if (CI) {
+        if (hpd) {
+          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
+          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
+          lower <- hpd.int[ , "lower"]
+          upper <- hpd.int[ , "upper"]
+        } else {
+          pr <- c((1-level)/2, 1-(1-level)/2)
+          q  <- apply(mcmc.chains[[chain]], 2, stats::quantile, probs = pr, names = FALSE)
+          lower <- q[1, ]
+          upper <- q[2, ]
+        }
+        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
+      } else {
+        CI.str <- NULL
+      }
+      
+      stats <- data.frame(Variable = paste0(name, "_", 1:num.free),
+                          Mean     = ifelse(!is.null(decimal), round(means, decimal), means),
+                          Median   = ifelse(!is.null(decimal), round(medians, decimal), medians),
+                          SD       = ifelse(!is.null(decimal), round(sds, decimal), sds),
+                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
+      )
+      if (!silent.flag) print(stats, row.names = FALSE)
+      if (!silent.flag) cat("----------------------------\n")
+    }
+    outputs <- list(mean = ifelse(!is.null(decimal), round(means, decimal), means), 
+                    median = ifelse(!is.null(decimal), round(medians, decimal), medians))
+    return(outputs)
+  } else if (name == "s") {
+    for (chain in 1:num.chains) {
+      if (!silent.flag) cat("Chain", chain, "\n")
+      mcmc <- nrow(mcmc.chains[[chain]])
+      if(ncol(mcmc.chains[[chain]])!=num.entities){stop("Number of num.entities is not equal to the length of s")}
+      
+      ## Compute the mean and median
+      means <- apply(mcmc.chains[[chain]], 2, mean)
+      medians <- apply(mcmc.chains[[chain]], 2, median)
+      sds <- apply(mcmc.chains[[chain]], 2, sd)
+      
+      ## Compute credible intervals for each parameter
+      if (CI) {
+        if (hpd) {
+          mcmc.obj <- coda::as.mcmc(mcmc.chains[[chain]])
+          hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
+          lower <- hpd.int[ , "lower"]
+          upper <- hpd.int[ , "upper"]
+        } else {
+          pr <- c((1-level)/2, 1-(1-level)/2)
+          q  <- apply(mcmc.chains[[chain]], 2, stats::quantile, probs = pr, names = FALSE)
+          lower <- q[1, ]
+          upper <- q[2, ]
+        }
+        CI.str <- paste0("[", round(lower, decimal), ", ", round(upper, decimal), "]")
+      } else {
+        CI.str <- NULL
+      }
+      
+      stats <- data.frame(Variable = paste0(name, "_", 1:num.entities),
+                          Mean     = ifelse(!is.null(decimal), round(means, decimal), means),
+                          Median   = ifelse(!is.null(decimal), round(medians, decimal), medians),
+                          SD       = ifelse(!is.null(decimal), round(sds, decimal), sds),
+                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
+      )
+      if (!silent.flag) print(stats, row.names = FALSE)
+      if (!silent.flag) cat("----------------------------\n")
+    }
+    outputs <- list(mean = ifelse(!is.null(decimal), round(means, decimal), means), 
+                    median = ifelse(!is.null(decimal), round(medians, decimal), medians))
     return(outputs)
   } else {
     for (chain in 1:num.chains) {
@@ -1074,15 +1229,16 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
       }
       
       stats <- data.frame(Variable = name,
-                          Mean     = round(means, decimal),
-                          Median   = round(medians, decimal),
-                          SD       = round(sds, decimal),
+                          Mean     = ifelse(!is.null(decimal), round(means, decimal), means),
+                          Median   = ifelse(!is.null(decimal), round(medians, decimal), medians),
+                          SD       = ifelse(!is.null(decimal), round(sds, decimal), sds),
                           CI       = if (CI) CI.str else NA_character_, check.names = FALSE
       )
       if (!silent.flag) print(stats, row.names = FALSE)
       if (!silent.flag) cat("----------------------------\n")
     }
-    outputs <- list(mean = round(means, decimal), median = round(medians, decimal))
+    outputs <- list(mean = ifelse(!is.null(decimal), round(means, decimal), means), 
+                    median = ifelse(!is.null(decimal), round(medians, decimal), medians))
     return(outputs)
   }
 }
@@ -1090,9 +1246,9 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
 
 
 
-###---------------------------###
-###    Extract MCMC chains    ###
-###---------------------------###
+###--------------------###
+###    Extract MCMC    ###
+###--------------------###
 
 ## INPUT:
 # chains:       A list of complete MCMC samples from each chain;
@@ -1135,48 +1291,6 @@ mcmc.extract <- function(chains = NULL, num.entities = NULL, name = NULL,
         }
       }
     }
-  } else if (name == "weights" || name == "lambda" || name == "nu") {
-    mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
-    
-    ## Compute Gelman-Rubin diagnostic (Rhat)
-    if (rhat) {
-      rhat_vals <- gelman.diag(mcmc.objs, autoburnin = FALSE)$psrf[, 1]
-      cat("        Rhat values         :", round(rhat_vals, digits = 4), "\n", sep = " ")
-    }
-    
-    for (chain in 1:num.chains) {
-      num.free <- dim(mcmc.chains[[chain]])[2]
-      
-      ## Compute Effective Sample Size (ESS)
-      if (ess) {
-        cat("Chain", chain, "\n")
-        cat("Effective Sample Size (ESS) : \n")
-        for (idx in 1:num.free) {
-          ess_vals <- effectiveSize(mcmc.objs[[chain]][ ,idx])
-          cat(paste0(name, "_", triplets[idx,1], triplets[idx,2], triplets[idx,3]), 
-              round(ess_vals, digits = 0), "/", length(mcmc.objs[[chain]][ ,idx]), "\n", sep = " ") 
-        }
-      }
-    }
-  } else if (name == "s") {
-    mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
-    
-    ## Compute Gelman-Rubin diagnostic (Rhat) and Effective Sample Size (ESS)
-    if (rhat) {
-      rhat_vals <- gelman.diag(mcmc.objs, autoburnin = FALSE)$psrf[, 1]
-      cat("        Rhat values         :", round(rhat_vals, digits = 4), "\n", sep = " ")
-    }
-    for (chain in 1:num.chains) {
-      if (ess) {
-        cat("Chain", chain, "\n")
-        cat("Effective Sample Size (ESS) : \n")
-        for (n in 1:num.entities) {
-          ess_vals <- effectiveSize(mcmc.objs[[chain]][,n])
-          cat(paste0(name, "_", n),
-              round(ess_vals, digits = 0), "/", length(mcmc.objs[[chain]][,n]), "\n", sep = " ") 
-        }
-      }
-    }
   } else if (name == "grad" || name == "curl" || name == "M") {
     mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
     
@@ -1198,6 +1312,48 @@ mcmc.extract <- function(chains = NULL, num.entities = NULL, name = NULL,
           ess_vals <- effectiveSize(mcmc.objs[[chain]][,p])
           cat(paste0(name, "_", pairs[p,1], pairs[p,2]), round(ess_vals, digits = 0), 
               "/", length(mcmc.objs[[chain]][,p]), "\n", sep = " ")
+        }
+      }
+    }
+  } else if (name == "weights" || name == "lambda" || name == "nu") {
+    mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
+    
+    ## Compute Gelman-Rubin diagnostic (Rhat)
+    if (rhat) {
+      rhat_vals <- gelman.diag(mcmc.objs, autoburnin = FALSE)$psrf[, 1]
+      cat("        Rhat values         :", round(rhat_vals, digits = 4), "\n", sep = " ")
+    }
+    
+    for (chain in 1:num.chains) {
+      num.free <- dim(mcmc.chains[[chain]])[2]
+      
+      ## Compute Effective Sample Size (ESS)
+      if (ess) {
+        cat("Chain", chain, "\n")
+        cat("Effective Sample Size (ESS) : \n")
+        for (idx in 1:num.free) {
+          ess_vals <- effectiveSize(mcmc.objs[[chain]][ ,idx])
+          cat(paste0(name, "_", idx), 
+              round(ess_vals, digits = 0), "/", length(mcmc.objs[[chain]][ ,idx]), "\n", sep = " ")
+        }
+      }
+    }
+  } else if (name == "s") {
+    mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
+    
+    ## Compute Gelman-Rubin diagnostic (Rhat) and Effective Sample Size (ESS)
+    if (rhat) {
+      rhat_vals <- gelman.diag(mcmc.objs, autoburnin = FALSE)$psrf[, 1]
+      cat("        Rhat values         :", round(rhat_vals, digits = 4), "\n", sep = " ")
+    }
+    for (chain in 1:num.chains) {
+      if (ess) {
+        cat("Chain", chain, "\n")
+        cat("Effective Sample Size (ESS) : \n")
+        for (n in 1:num.entities) {
+          ess_vals <- effectiveSize(mcmc.objs[[chain]][,n])
+          cat(paste0(name, "_", n),
+              round(ess_vals, digits = 0), "/", length(mcmc.objs[[chain]][,n]), "\n", sep = " ") 
         }
       }
     }
@@ -1224,16 +1380,16 @@ mcmc.extract <- function(chains = NULL, num.entities = NULL, name = NULL,
 
 
 
-###----------------------------------------------------###
-###    Build Hodge operators for the complete graph    ###
-###----------------------------------------------------###
+###-----------------------------###
+###    Build Hodge Operators    ###
+###-----------------------------###
 
 ## INPUT:
 # num.entities: Number of entities (e.g., items and players);
 # tol:          Numeric. A small tolerance value to determine the rank of C.ast
 
 ## OUTPUT:
-# A list containing the following sparse matrices and basis matrices:
+# A list containing the following matrices and basis matrices:
 # G:      A sparse matrix of the gradient operator 'grad';
 # C.ast:  A sparse matrix of the curl adjoint operator 'curl*;
 # H:      A matrix whose columns form an orthonormal basis for the curl space;
@@ -1283,10 +1439,10 @@ build.hodge_operators <- function(num.entities = NULL, tol = 1e-10) {
 
 
 
-##################  BEGIN Functions for Generating True Data  ##################
+#############################  BEGIN Simulations  ##############################
 
 ###------------------------###
-###    Compute Phi.true    ###
+###    Compute True Phi    ###
 ###------------------------###
 
 ## INPUT:
@@ -1315,9 +1471,9 @@ compute.Phi.true <- function(num.entities = NULL, weights = NULL) {
 
 
 
-###----------------------------------------------###
-###    Compute Sparse Phi via L1 Optimization    ###
-###----------------------------------------------###
+###---------------------------------------------------###
+###    Compute True Sparse Phi via L1 Optimization    ###
+###---------------------------------------------------###
 
 ## INPUT:
 # num.entities:   Number of entities (e.g., items and players);
@@ -1371,9 +1527,9 @@ compute.spPhi.true <- function(num.entities = NULL, norm = NULL, seed = 1,
 
 
 
-###----------------------###
-###    Compute M.true    ###
-###----------------------###
+###------------------------------###
+###    Compute True Relations    ###
+###------------------------------###
 
 ## INPUT:
 # num.entities: Number of entities (e.g., items and players).
@@ -1382,36 +1538,42 @@ compute.spPhi.true <- function(num.entities = NULL, norm = NULL, seed = 1,
 # Phi.prior:    A num.triplets×1 vector representing the triangular parameters.
 
 ## OUTPUT:
-# An num.entities × num.entities integer matrix of simulated win counts.
+# A list containing relation and ratio matrices with ('grad','curl','M') and ('grad.ratio', 'curl.ratio') columns.
 
 compute.relations.true <- function(num.entities = NULL, s = NULL, Phi = NULL) {
   ## Preparation
   pairs <- t(combn(num.entities, 2))
-  num.pairs <- nrow(pairs)
-  num.triplets <- length(Phi)
   triplets <- t(combn(num.entities, 3))
-  if(num.triplets!=nrow(triplets)){stop("Number of triplets given len(s) is not equal to the length of Phi")}
+  num.pairs <- nrow(pairs)
+  num.triplets <- nrow(triplets)
+  if(num.triplets!=length(Phi)){stop("Number of triplets given len(s) is not equal to the length of Phi")}
   
   ## Build operators
   operators <- build.hodge_operators(num.entities = num.entities, tol = 1e-10)
-  G <- operators$G  # G = grad (num.pairs x N)
-  C.ast <- operators$C.ast  # C.ast = curl* (num.pairs x num.triplets)
+  G <- operators$G
+  C.ast <- operators$C.ast
   
-  ## Match-up function: M = grad s + curl* \Phi = Gs + C.ast \Phi
+  ## Compute each relation
   grad.true <- as.vector(G %*% s)
   curl.true <- as.vector(C.ast %*% Phi)
   M.true <- grad.true + curl.true
+  relations <- cbind(grad.true, curl.true, M.true)
+  colnames(relations) <- c("grad", "curl", "M")
   
-  outputs <- round(cbind(grad.true, curl.true, M.true), 3)
-  colnames(outputs) <- c("grad", "curl", "M")
-  return(outputs)
+  ## Compute each ratio
+  grad.ratio <- sum(grad.true^2) / sum(M.true^2)
+  curl.ratio <- sum(curl.true^2) / sum(M.true^2)
+  ratios <- cbind(grad.ratio, curl.ratio)
+  colnames(ratios) <- c("grad.ratio", "curl.ratio")
+  
+  list(relations = relations, ratios = ratios)
 }
 
 
 
 
 ###--------------------------------------------###
-###    Compute Match-up from empirical data    ###
+###    Compute Match-up from Empirical Data    ###
 ###--------------------------------------------###
 
 ## INPUT:
@@ -1443,104 +1605,372 @@ compute.M <- function(df = NULL) {
 
 
 
-###----------------------------###
-###    Generate comparisons    ###
-###----------------------------###
-
-## INPUT:
-# num.entities: Number of entities (e.g., items and players).
-# freq.vec:     Integer vector of length choose(num.entities, 2);
-# s:            A N×1 vector representing the true score of each subject;
-# Phi.prior:    A num.triplets×1 vector representing the triangular parameters;
-# seed:         Integer: Random seed for reproducibility.
-
-## OUTPUT:
-# An num.entities × num.entities integer matrix of simulated win counts.
-
-generate.comparisons <- function(num.entities = NULL, freq.vec = NULL, 
-                                 s = NULL, Phi = NULL, seed = 73) {
-  set.seed(seed)
-  pairs <- t(combn(num.entities, 2))
-  num.pairs <- nrow(pairs)
-  num.triplets <- length(Phi)
-  triplets <- t(combn(1:num.entities, 3))
-  if(num.triplets!=nrow(triplets)){stop("Number of triplets given len(s) is not equal to the length of Phi")}
-  
-  ## Initiate an N×N matrix storing results (diagonal is NA)
-  result <- matrix(NA_integer_, nrow = num.entities, ncol = num.entities)
-  rownames(result) <- colnames(result) <- paste0("Entity", 1:num.entities)
-  
-  ## Build operators
-  operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
-  G <- operators$G  # G = grad (num.pairs x N)
-  C.ast <- operators$C.ast  # C.ast = curl* (num.pairs x num.triplets)
-  
-  ## Match-up function: M = grad s + curl* \Phi = Gs + C.ast \Phi
-  grad.flow <- as.vector(G %*% s)
-  curl.flow <- as.vector(C.ast %*% Phi)
-  M.vec <- grad.flow + curl.flow
-  
-  p.vec <- 1 / (1 + exp(-M.vec))
-  win.freq.vec <- rbinom(length(p.vec), size = freq.vec, prob = p.vec)
-  result <- matrix(0, num.entities, num.entities)
-  result[cbind(pairs[,1], pairs[,2])] <- win.freq.vec
-  result[cbind(pairs[,2], pairs[,1])] <- freq.vec - win.freq.vec
-  return(result)
-}
-
-
-
-
 ###--------------------------------###
-###    Generate artificial data    ###
+###    Generate Artificial Data    ###
 ###--------------------------------###
 
 ## INPUT:
 # num.entities: Number of entities (e.g., items and players);
-# s_interval:   Numeric. The interval used to generate an intrinsic parameter;
-# freq.pair:    Integer. The number of comparisons to simulate for each unique pair;
+# s_interval:   Numeric. A single value or a vector of length 'num.entities' 
+#               specifying the true intrinsic parameters.
+# freq.pair:    Integer. A single value for all pairs, or a vector of length choose(num.entities, 2)
+#               specifying the number of comparisons for each pair.
 # weights:      A numeric vector of weights for the basis H.
 
 ## OUTPUT:
 # A list containing the true parameters and generated data: 
-# s.true, w.true, Phi.true, M.true, artificial.data, entity.names
+# artificial.data, entity.names, s, weights, Phi, relations
 
-generate.artificial <- function(num.entities = NULL, s_interval = 0.5, freq.pair = 30, weights = NULL) {
+generate.artificial.data <- function(num.entities = NULL, s_interval = NULL, freq.pair = NULL, weights = NULL) {
   ## Preparation
+  pairs <- t(combn(num.entities, 2))
+  triplets <- t(combn(1:num.entities, 3))
+  num.pairs <- nrow(pairs)        # number of unique (i,j) pairs
+  num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
   num.free <- choose(num.entities-1,2)
-  num.pairs <- choose(num.entities, 2)
   entity.names <- paste("Entity", 1:num.entities)
   freq.vec <- rep(freq.pair, num.pairs)
   
-  ## Generate s.true (intrinsic parameters)
-  s.true <- seq(from = s_interval, by = s_interval, length.out = num.entities)
-  s.true <- s.true - mean(s.true) # centering
+  if (length(freq.pair) == 1) {
+    freq.vec <- rep(freq.pair, num.pairs)
+  } else if (length(freq.pair) == num.pairs) {
+    freq.vec <- freq.pair
+  } else {
+    stop(paste("'freq.pair' must be a single number or a vector of length", num.pairs))
+  }
   
-  ## Compute Phi.true (triangular parameters)
-  Phi.true <- compute.Phi.true(num.entities = num.entities, weights = w.true)
-  
-  ## Compute relation.true (relations matrix)
+  ## Define each parameter (s, Phi) and relations
+  if (length(s_interval) == 1) {
+    s.true <- seq(from = s_interval, by = s_interval, length.out = num.entities)
+    s.true <- s.true - mean(s.true) # centering
+  } else if (length(s_interval) == num.entities) {
+    s.true <- s_interval - mean(s_interval) # centering
+  } else {
+    stop(paste("'s_interval' must be a single number or a vector of length", num.entities))
+  }
+  Phi.true <- compute.Phi.true(num.entities = num.entities, weights = weights)
   relations.true <- compute.relations.true(num.entities = num.entities, s = s.true, Phi = Phi.true)
   
   ## Generate comparison data
-  artificial.counts <- generate.comparisons(num.entities = num.entities,
-                                            freq.vec = freq.vec,
-                                            s = s.true,
-                                            Phi = Phi.true)
-  rownames(artificial.counts) <- colnames(artificial.counts) <- entity.names
+  p.vec <- 1 / (1 + exp(-relations.true$relations[,'M']))
+  win.freq.vec <- rbinom(length(p.vec), size = freq.vec, prob = p.vec)
+  artificial.table <- matrix(0, num.entities, num.entities)
+  artificial.table[cbind(pairs[,1], pairs[,2])] <- win.freq.vec
+  artificial.table[cbind(pairs[,2], pairs[,1])] <- freq.vec - win.freq.vec
+  rownames(artificial.table) <- colnames(artificial.table) <- entity.names
   
   ## Convert to binomial format
-  artificial.data <- countsToBinomial(artificial.counts)
+  artificial.data <- countsToBinomial(artificial.table)
   artificial.data$n_ij <- artificial.data$win1 + artificial.data$win2
   artificial.data$y_ij <- artificial.data$win1
   
-  result <- list(X = artificial.data, entity.names = entity.names, s = s.true, 
-                 weights = weights, Phi = Phi.true, relations = relations.true)
+  result <- list(X = artificial.data, entity.names = entity.names, 
+                 s = s.true, weights = weights, Phi = Phi.true, 
+                 relations = relations.true$relations, ratios = relations.true$ratios)
   return(result)
 }
 
 
-##################  BEGIN Functions for Generating True Data  ##################
+
+
+###-----------------------------------###
+###   Generate Simulation Datasets    ###
+###-----------------------------------###
+
+## INPUT:
+# num.cores:    Integer. The number of CPU cores to use for parallel processing;
+# num.replica:  Integer. The number of replications (datasets) to generate;
+# num.entities: Number of entities (e.g., items and players);
+# setting:      String. The simulation setting: "transitive", "sparse", or "dense";
+# s.sd:         Numeric. The standard deviation for generating the intrinsic worth vector;
+# freq.range:   Numeric vector of length 1 or 2. The range [min, max] for sampling
+#               the number of comparisons for each pair;
+# w.params:     A list of parameters for generating 'weights' depending on the 'setting':
+#               - "sparse":     Requires list(norm = ..., sparsity = ...);
+#               - "dense": Requires list(sd = ...).
+
+## OUTPUT:
+# A list of length 'num.replica', where each element is a dataset.
+
+generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.entities = NULL, 
+                                         setting = c("transitive", "sparse", "dense"), 
+                                         s.sd = 1, freq.range = NULL, w.params = NULL) 
+  {
+  ## Preparation
+  if (!setting %in% c("transitive", "sparse", "dense")) {
+    stop("Invalid setting. Must be 'transitive', 'sparse', or 'dense'.")
+  }
+  num.pairs <- choose(num.entities, 2)
+  num.free <- choose(num.entities-1, 2)
+  
+  ## Generate simulation datasets
+  datasets <- parallel::mclapply(1:num.replica, function(r) {
+    set.seed(r)
+    
+    ## Uniformly samples s_interval, freq.pair
+    s.vec <- sort(rnorm(num.entities, mean = 0, s.sd))
+    freq.min <- freq.range[1]
+    freq.max <- if (length(freq.range) == 1) freq.min else freq.range[2]
+    if (freq.min == freq.max) {
+      freq.vec <- rep(freq.min, num.pairs)
+    } else {
+      freq.vec <- sample(freq.min:freq.max, size = num.pairs, replace = TRUE)
+    }
+    
+    ## Generate weights based on 'setting'
+    weights <- switch(
+      setting,
+      "transitive" = {  # Simulation 1
+        rep(0, num.free)
+      },
+      "sparse" = {  # Simulation 2
+        if (is.null(w.params$norm) || is.null(w.params$sparsity)) stop("w.params for 'sparse' must contain 'norm' and 'sparsity'.")
+        compute.spPhi.true(num.entities = num.entities, norm = w.params$norm, 
+                           seed = r, sparsity.level = w.params$sparsity
+                           )$weights
+      },
+      "dense" = {  # Simulation 3
+        if (is.null(w.params$sd)) stop("w.params for 'dense' must contain 'sd'.")
+        rnorm(num.free, mean = 0, sd = w.params$sd)
+      }
+    )
+    
+    ## Generate a true dataset
+    generate.artificial.data(num.entities = num.entities, 
+                             s_interval = s.vec, 
+                             freq.pair = freq.vec, 
+                             weights = weights)
+  }, mc.cores = min(num.cores, parallel::detectCores()-1))
+  return(datasets)
+}
+
+
+
+
+###-----------------------###
+###    Compute Metrics    ###
+###-----------------------###
+
+## INPUT:
+# model:          A character vector specifying which model to run MCMC;
+#                 Defaults: c("CBT.cpp", "BBT.Stan");
+# mcmc.chain:     A list of specific MCMC samples;
+# relations.true: a
+# time:           A numeric.
+# level:          The credible interval level (e.g., 0.95);
+# hpd:            Logical flag: if TRUE, return the Highest Posterior Density (HPD) interval;
+
+## OUTPUT:
+# A data frame storing metrics (MSE, CP, Accuracy, Recall, Precision) for each model
+
+compute.metrics <- function(model = c("CBT.cpp", "BBT.Stan"), mcmc.chain = NULL, 
+                            relations.true = NULL, time = NULL, level = 0.95, hpd = TRUE)
+  {
+  ## Preparation
+  pr <- c((1-level)/2, 1-(1-level)/2)
+  M_true <- relations.true[,'M']
+  grad_true <- relations.true[,'grad']
+  curl_true <- relations.true[,'curl']
+  
+  ## Compute each Credible Interval (grad, M)
+  if (hpd) {
+    mcmc.obj_M <- coda::as.mcmc(mcmc.chain$M)
+    hpd.int_M  <- coda::HPDinterval(mcmc.obj_M, prob = level)
+    M_hat.lower <- hpd.int_M[ , "lower"]
+    M_hat.upper <- hpd.int_M[ , "upper"]
+    
+    mcmc.obj_grad <- coda::as.mcmc(mcmc.chain$grad)
+    hpd.int_grad  <- coda::HPDinterval(mcmc.obj_grad, prob = level)
+    grad_hat.lower <- hpd.int_grad[ , "lower"]
+    grad_hat.upper <- hpd.int_grad[ , "upper"]
+  } else {
+    CI_M        <- apply(mcmc.chain$M, 2, quantile, probs = pr)
+    M_hat.lower <- CI_M[1, ]
+    M_hat.upper <- CI_M[2, ]
+    
+    CI_grad        <- apply(mcmc.chain$grad, 2, quantile, probs = pr)
+    grad_hat.lower <- CI_grad[1, ]
+    grad_hat.upper <- CI_grad[2, ]
+  }
+  CP_M.flag    <- mean(M_true >= M_hat.lower & M_true <= M_hat.upper)
+  CP_grad.flag <- mean(grad_true >= grad_hat.lower & grad_true <= grad_hat.upper)
+  
+  ## For Posterior Mean
+  M_hat.mean    <- apply(mcmc.chain$M, 2, mean)
+  MSE_M.mean    <- mean((M_hat.mean - M_true)^2)
+  Accuracy.mean <- mean(sign(M_hat.mean * M_true) > 0)
+  grad_hat.mean <- apply(mcmc.chain$grad, 2, mean)
+  MSE_grad.mean <- mean((grad_hat.mean - grad_true)^2)
+  
+  ## For Posterior Median
+  M_hat.median    <- apply(mcmc.chain$M, 2, median)
+  MSE_M.median    <- mean((M_hat.median - M_true)^2)
+  Accuracy.median <- mean(sign(M_hat.median * M_true) > 0)
+  grad_hat.median <- apply(mcmc.chain$grad, 2, median)
+  MSE_grad.median <- mean((grad_hat.median - grad_true)^2)
+  
+  ## Intrinsic Metrics for each model
+  if (model == "CBT.cpp") {
+    # Compute each Credible Interval (curl)
+    if (hpd) {
+      mcmc.obj_curl <- coda::as.mcmc(mcmc.chain$curl)
+      hpd.int_curl  <- coda::HPDinterval(mcmc.obj_curl, prob = level)
+      curl_hat.lower <- hpd.int_curl[ , "lower"]
+      curl_hat.upper <- hpd.int_curl[ , "upper"]
+    } else {
+      CI_curl <- apply(mcmc.chain$curl, 2, quantile, probs = pr)
+      curl_hat.lower <- CI_curl[1, ]
+      curl_hat.upper <- CI_curl[2, ]
+    }
+    CP_curl.flag <- mean(curl_true >= curl_hat.lower & curl_true <= curl_hat.upper)
+    
+    # For Recall/Precision
+    nonzero.idx_true <- which(curl_true != 0)
+    num.nonzero_true <- length(nonzero.idx_true)
+    nonzero.idx_hat <- which(curl_hat.lower > 0 | curl_hat.upper < 0)
+    num.nonzero_hat <- length(nonzero.idx_hat)
+    num.nonzero_detected <- length(intersect(nonzero.idx_true, nonzero.idx_hat))
+    
+    Recall <- ifelse(num.nonzero_true == 0, 0, num.nonzero_detected / num.nonzero_true)
+    Precision <- ifelse(num.nonzero_hat == 0, 0, num.nonzero_detected / num.nonzero_hat)
+    
+    # For Posterior Mean
+    curl_hat.mean <- apply(mcmc.chain$curl, 2, mean)
+    MSE_curl.mean <- mean((curl_hat.mean - curl_true)^2)
+    
+    # For Posterior Median
+    curl_hat.median <- apply(mcmc.chain$curl, 2, median)
+    MSE_curl.median <- mean((curl_hat.median - curl_true)^2)
+  } else {
+    MSE_curl.mean <- MSE_curl.median <- NA
+    CP_curl.mean <- CP_curl.median <- NA
+    Recall <- NA
+    Precision <- NA
+    CP_curl.flag <- NA
+  }
+  
+  # Row for Posterior Mean
+  df.mean <- data.frame(Model        = model,
+                        Estimator    = "Mean",
+                        MSE_M        = MSE_M.mean,
+                        MSE_grad     = MSE_grad.mean,
+                        MSE_curl     = MSE_curl.mean,
+                        CP_M.flag    = CP_M.flag,
+                        CP_grad.flag = CP_grad.flag,
+                        CP_curl.flag = CP_curl.flag,
+                        Accuracy     = Accuracy.mean,
+                        Recall       = Recall,
+                        Precision    = Precision,
+                        Time         = time)
+  
+  # Row for Posterior Median
+  df.median <- data.frame(Model        = model,
+                          Estimator    = "Median",
+                          MSE_M        = MSE_M.median,
+                          MSE_grad     = MSE_grad.median,
+                          MSE_curl     = MSE_curl.median,
+                          CP_M.flag    = CP_M.flag,
+                          CP_grad.flag = CP_grad.flag,
+                          CP_curl.flag = CP_curl.flag,
+                          Accuracy     = Accuracy.median,
+                          Recall       = Recall,
+                          Precision    = Precision,
+                          Time         = time)
+  return(rbind(df.mean, df.median))
+}
+
+
+
+
+###----------------------------###
+###    Run Simulation Study    ###
+###----------------------------###
+
+## INPUT:
+# num.cores:    Integer. The number of CPU cores to use for parallel processing;
+# num.replica:  Integer. The number of replications (datasets) to generate;
+# num.entities: Number of entities (e.g., items and players);
+# setting:      String. The simulation setting: "transitive", "sparse", or "dense";
+# mcmc.params:  A list of parameters for MCMC: list(mcmc, burn, thin);
+# data.params:  A list of parameters for generating datasets: list(s.sd, freq.range, w.params);
+# model.params: A list of priors for 'model':
+#               list(s.prior, sigma.prior, Phi.prior, lambda.prior, tau.prior, nu.prior, xi.prior).
+
+## OUTPUT:
+# A data frame storing the average of the replication results for 'num.replica' iterations
+
+run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL, 
+                           setting = c("transitive", "sparse", "dense"), 
+                           mcmc.params = NULL, data.params = NULL, model.params = NULL){
+  run.time <- Sys.time()
+  ## Preparation
+  mcmc <- mcmc.params$mcmc
+  burn <- mcmc.params$burn
+  thin <- mcmc.params$thin
+  s.prior <- model.params$s.prior
+  sigma.prior <- model.params$sigma.prior
+  Phi.prior <- model.params$Phi.prior
+  lambda.prior <- model.params$lambda.prior
+  tau.prior <- model.params$tau.prior
+  nu.prior <- model.params$nu.prior
+  xi.prior <- model.params$xi.prior
+  operators <- build.hodge_operators(num.entities = num.entities, tol = 1e-10) # Build operators
+  
+  ## Generate Datasets
+  cat(paste("Step 1: Generating", num.replica, "datasets for 'model':", setting, "...\n"))
+  datasets <- generate.simulation.datasets(num.cores = num.cores, 
+                                           num.replica = num.replica,
+                                           num.entities = num.entities,
+                                           setting = setting,
+                                           s.sd = data.params$s.sd,
+                                           freq.range = data.params$freq.range,
+                                           w.params = data.params$w.params)
+  
+  ## Fit 'model' for each datasets
+  cat(paste("Step 2: Running models on", num.replica, "datasets...\n"))
+  results.list <- parallel::mclapply(1:num.replica, function(r) {
+    # Preparation
+    data_r <- datasets[[r]]
+    X <- data_r$X
+    relations.true <- data_r$relations
+    metrics.list <- list()
+    
+    # Evaluate CBT.cpp
+    start.time <- Sys.time()
+    set.seed(r)
+    results.CBT <- CBT.Gibbs.cpp(X, mcmc = mcmc, burn = burn, thin = thin, operators = operators,
+                                 s.prior = s.prior, sigma.prior = sigma.prior, 
+                                 Phi.prior = Phi.prior, 
+                                 lambda.prior = lambda.prior, tau.prior = tau.prior, 
+                                 nu.prior = nu.prior, xi.prior = xi.prior)
+    time.sec <- difftime(Sys.time(), start.time, units = "sec")
+    metrics.list$CBT <- compute.metrics(model = "CBT.cpp", results.CBT,
+                                        relations.true, as.numeric(time.sec),
+                                        level = 0.95, hpd = TRUE)
+    
+    # Evaluate BBT.Stan
+    start.time <- Sys.time()
+    results.BBT <- BBT.Stan(X, num.chains = 1, mcmc = mcmc, burn = burn, thin = thin, 
+                            operators = operators, seed = r)
+    time.sec <- difftime(Sys.time(), start.time, units = "sec")
+    metrics.list$BBT <- compute.metrics(model = "BBT.Stan", results.BBT[[1]],
+                                        relations.true, as.numeric(time.sec),
+                                        level = 0.95, hpd = TRUE)
+    
+    do.call(rbind, metrics.list)
+  }, mc.cores = num.cores)
+  
+  ## Summary
+  cat("Step 3: Aggregating results...\n\n")
+  results.df <- do.call(rbind, Filter(Negate(is.null), results.list))
+  summary <- aggregate(. ~ Model + Estimator, data = results.df, FUN = mean, na.action = na.pass)
+  
+  end.time <- difftime(Sys.time(), run.time, units = "sec")
+  cat("Simulation finished in", end.time, "seconds.\n") 
+  return(summary[order(summary$Model),]) # Sort in Model
+}
+
+##############################  END Simulations  ###############################
 
 
 
@@ -1548,7 +1978,7 @@ generate.artificial <- function(num.entities = NULL, s_interval = 0.5, freq.pair
 ######################  BEGIN Functions for Visualization  #####################
 
 ###---------------------------###
-###    Plot match networks    ###
+###    Plot Match Networks    ###
 ###---------------------------###
 
 ## INPUT:
@@ -1584,7 +2014,6 @@ plot.networks <- function(relations = NULL, num.entities = NULL, components = c(
   ## Set up the plotting area
   par(mfrow = c(1, length(components)), cex.main = 2, mar = c(1, 1, 2.5, 1), oma = c(1, 1, 2, 1))
   
-  
   if (is.null(layout.coords)) {
     ## Define base graph
     base.name <- if ("M" %in% colnames(relations)) "M" else components[1]
@@ -1597,14 +2026,14 @@ plot.networks <- function(relations = NULL, num.entities = NULL, components = c(
       win2 = 1-p_base
     )
     
-    nodes_df_base <- data.frame(name = 1:num.entities)
-    edges_df_base <- bin_df_base %>%
+    nodes.df_base <- data.frame(name = 1:num.entities)
+    edges.df_base <- bin_df_base %>%
       mutate(
         winner = if_else(win1 > win2, player1, player2),
         loser  = if_else(win1 > win2, player2, player1)
       ) %>%
-      select(from = winner, to = loser)
-    g_base <- graph_from_data_frame(vertices = nodes_df_base, d = edges_df_base, directed = TRUE)
+      dplyr::select(from = winner, to = loser)
+    g_base <- graph_from_data_frame(vertices = nodes.df_base, d = edges.df_base, directed = TRUE)
     
     ## Calculate and fix the coordinate
     layout.coords <- switch(layout,
@@ -1615,8 +2044,7 @@ plot.networks <- function(relations = NULL, num.entities = NULL, components = c(
       stop("Provided 'layout.coords' must be a matrix with a row for each entity.")
     }
   }
-  
-  nodes_df <- data.frame(name = 1:num.entities)
+  nodes.df <- data.frame(name = 1:num.entities)
   
   ## Draw a network of each component
   for (comp.name in components) {
@@ -1632,28 +2060,28 @@ plot.networks <- function(relations = NULL, num.entities = NULL, components = c(
     )
     
     ## Setting edges
-    edges_df <- bin_df %>%
+    edges.df <- bin_df %>%
       mutate(
-        is_tie = (win1 == win2),
+        is_tie = abs(win1-win2) < .Machine$double.eps^0.5,
         winner = if_else(win1 > win2, player1, player2),
         loser  = if_else(win1 > win2, player2, player1),
         w_win  = pmax(win1, win2),
         w_lose = pmin(win1, win2),
         metric = case_when(
           weight == "diff"  ~ w_win - w_lose,
-          weight == "prop"  ~ w_win / w_lose
+          weight == "prop"  ~ if_else(w_lose == 0, NA_real_, w_win / w_lose)
         ),
         label = paste(round(w_win, 3), round(w_lose, 3), sep = "-")
       ) 
     if (tie_mode == "skip") {
-      edges_df <- edges_df %>% filter(!is_tie)
+      edges.df <- edges.df %>% filter(!is_tie)
     }
-    edges_df <- edges_df %>% select(from = winner, to = loser, metric, label)
+    edges.df <- edges.df %>% dplyr::select(from = winner, to = loser, metric, label)
     
     ## Define graph object
-    g <- graph_from_data_frame(vertices = nodes_df, d = edges_df, directed = TRUE)
+    g <- graph_from_data_frame(vertices = nodes.df, d = edges.df, directed = TRUE)
     if (length(unique(E(g)$metric)) > 1) {
-      E(g)$width <- rescale(E(g)$metric, to = c(0.5, 3)) # scaling width of all edges
+      E(g)$width <- scales::rescale(E(g)$metric, to = c(0.5, 3)) # scaling width of all edges
     } else {
       E(g)$width <- 3
     }
@@ -1664,10 +2092,10 @@ plot.networks <- function(relations = NULL, num.entities = NULL, components = c(
     csize <- scc$csize
     eH <- as.integer(head_of(g, E(g)))
     eT <- as.integer(tail_of(g, E(g)))
-    same_scc <- memb[eH] == memb[eT]
-    scc_gt1  <- csize[memb[eH]] > 1
-    loop_e   <- which_loop(g)
-    on_cycle <- (same_scc & scc_gt1) | loop_e
+    scc.same <- memb[eH] == memb[eT]
+    scc.gt1  <- csize[memb[eH]] > 1
+    edge.loop   <- which_loop(g)
+    on_cycle <- (scc.same & scc.gt1) | edge.loop
     E(g)$color <- rgb(0.2, 0.5, 0.9, 1)
     E(g)[on_cycle]$color <- rgb(1, 0.1, 0.3, 1)
     
@@ -1697,9 +2125,10 @@ plot.networks <- function(relations = NULL, num.entities = NULL, components = c(
 
 
 
-###---------------------------###
-###    Plot Reversed Edges    ###
-###---------------------------###
+
+###----------------------------------------------###
+###    Plot Match Network with Reversed Edges    ###
+###----------------------------------------------###
 
 ## INPUT:
 # graphs.estimated: A named list of the estimated igraph objects;
@@ -1709,78 +2138,171 @@ plot.networks <- function(relations = NULL, num.entities = NULL, components = c(
 ## OUTPUT:
 # Plots the reversed edges for non-identical graphs.
 
-plot.reversed_edges <- function(graphs.estimated = NULL, graphs.true = NULL, layout.coords = NULL) 
-  {
+plot.reversed_edges <- function(graphs.estimated = NULL, graphs.true = NULL, layout.coords = NULL) {
+  ## Helper function to set name = ID if name is NULL
+  name.vertex <- function(g) {
+    if (is.null(V(g)$name)) {
+      V(g)$name <- as.character(1:vcount(g))
+    }
+    return(g)
+  }
+  
   ## Helper function to check if two graphs are identical
-  are_graphs_identical <- function(g1, g2) {
-    el1 <- as_edgelist(g1, names = FALSE)
-    el1_sorted <- el1[order(el1[, 1], el1[, 2]), , drop = FALSE]
-    el2 <- as_edgelist(g2, names = FALSE)
-    el2_sorted <- el2[order(el2[, 1], el2[, 2]), , drop = FALSE]
-    return(identical(el1_sorted, el2_sorted))
+  check.identicality <- function(g1, g2) {
+    el1 <- as_edgelist(g1, names = TRUE)
+    el2 <- as_edgelist(g2, names = TRUE)
+    el1.sorted <- el1[order(el1[, 1], el1[, 2]), , drop = FALSE]
+    el2.sorted <- el2[order(el2[, 1], el2[, 2]), , drop = FALSE]
+    return(identical(el1.sorted, el2.sorted))
   }
   
   ## Compute differences for each component
-  common_components <- intersect(names(graphs.estimated), names(graphs.true))
-  diff_data <- sapply(common_components, function(comp.name) {
-    g.estimate <- graphs.estimated[[comp.name]]
-    g.true     <- graphs.true[[comp.name]]
+  components.common <- intersect(names(graphs.estimated), names(graphs.true))
+  edges.diff <- sapply(components.common, function(comp.name) {
+    g.estimate <- name.vertex(graphs.estimated[[comp.name]])
+    g.true     <- name.vertex(graphs.true[[comp.name]])
 
-    if (are_graphs_identical(g.estimate, g.true)) {
+    if (check.identicality(g.estimate, g.true)) {
       return(list(identical = TRUE))
     } else {
-      reversed <- as_edgelist(difference(g.estimate, g.true), names = FALSE)
-      return(list(identical = FALSE, reversed_edges = reversed))
+      # Define data frame including differences
+      # False Positive (FP): Exist only in Estimated Graph
+      fp.df <- as.data.frame(as_edgelist(difference(g.estimate, g.true), names = TRUE))
+      names(fp.df) <- c("from", "to")
+      if (nrow(fp.df) > 0) fp.df$fp_id <- 1:nrow(fp.df) else fp.df$fp_id <- integer(0)
+      
+      # False Negative (FN): Exist only in True Graph
+      fn.df <- as.data.frame(as_edgelist(difference(g.true, g.estimate), names = TRUE))
+      names(fn.df) <- c("from", "to")
+      if (nrow(fn.df) > 0) fn.df$fn_id <- 1:nrow(fn.df) else fn.df$fn_id <- integer(0)
+      
+      # Specify the reversed edges
+      reversed_fn.idx <- reversed_fp.idx <- integer(0)
+      if (nrow(fn.df) > 0 && nrow(fp.df) > 0) {
+        reversed_pairs <- merge(fn.df, fp.df, by.x = c("from", "to"), by.y = c("to", "from"))
+        
+        if(nrow(reversed_pairs) > 0) {
+          reversed_fn.idx <- reversed_pairs$fn_id
+          reversed_fp.idx <- reversed_pairs$fp_id
+        }
+      }
+      
+      # Classify 3 differences in each edge
+      reversed_fn <- fn.df[fn.df$fn_id %in% reversed_fn.idx, c("from", "to")]
+      reversed_fp <- fp.df[fp.df$fp_id %in% reversed_fp.idx, c("from", "to")]
+      edges.reversed   <- rbind(reversed_fn, reversed_fp)                     # Reversed Edges
+      edges.fn <- fn.df[!(fn.df$fn_id %in% reversed_fn.idx), c("from", "to")] # False Negative
+      edges.fp <- fp.df[!(fp.df$fp_id %in% reversed_fp.idx), c("from", "to")] # False Positive
+      
+      list(
+        identical = FALSE, 
+        edges.fp = as.matrix(edges.fp),
+        edges.fn = as.matrix(edges.fn),
+        edges.reversed = as.matrix(edges.reversed)
+      )
     }
   }, simplify = FALSE)
   
   ## Filter for components that have differences
-  diff_components <- names(Filter(function(x) !x$identical, diff_data))
-  if (length(diff_components) == 0) {
+  components.diff <- names(Filter(function(x) !x$identical, edges.diff))
+  if (length(components.diff) == 0) {
     message("All graphs are identical.")
-    return(invisible(diff_data))
+    return(invisible(edges.diff))
   }
   
   ## Set up plotting area and plot the differences
-  par(mfrow = c(1, length(diff_components)), cex.main = 1.5, mar = c(1, 1, 2, 1))
+  par(mfrow = c(1, length(components.diff)), cex.main = 1.5, mar = c(1, 1, 3, 1))
   
-  for (comp.name in diff_components) {
-    g.true <- graphs.true[[comp.name]]
-    reversed_edges <- diff_data[[comp.name]]$reversed_edges
+  for (comp.name in components.diff) {
+    # Define different edges
+    g.true <- name.vertex(graphs.true[[comp.name]])
+    edges.fp <- edges.diff[[comp.name]]$edges.fp
+    edges.fn <- edges.diff[[comp.name]]$edges.fn
+    edges.reversed <- edges.diff[[comp.name]]$edges.reversed
     
-    # Plot the true graph as a grey background
-    plot(g.true, 
-         layout = layout.coords,
-         vertex.size = 0,
-         vertex.label = NA,
-         edge.color = "grey80",
-         edge.width = 1,
-         edge.arrow.size = 0.3,
-         edge.label = NA,
-         main = sprintf("%s", comp.name)
+    # Plot the True Graph as a Base Graph
+    nodes.df <- as_data_frame(g.true, what = "vertices")
+    plot(
+      g.true, 
+      layout = layout.coords,
+      vertex.size = 0,
+      edge.color = "grey80",
+      edge.width = 1,
+      edge.arrow.size = 0.3,
+      edge.label = NA,
+      main = "" # sprintf("%s", comp.name)
+      )
+    
+    # Set title and legends
+    title(main = sprintf("%s", comp.name), line = 2, cex.main = 1.5)
+    legend(
+      "top",
+      legend = c("False Positive", "False Negative", "Reversed"), 
+      col = c("darkorange1", "cornflowerblue", "blueviolet"),
+      lty = 1,
+      lwd = rep(4,3),
+      bty = "n",
+      horiz = TRUE,
+      cex = 0.9,
+      xpd = TRUE,
+      inset = c(0, -0.05)
     )
     
-    # Overlay the reversed edges in orange
-    if (nrow(reversed_edges) > 0) {
-      all_nodes_df <- data.frame(name = V(g.true)$name)
-      reversed_graph <- graph_from_data_frame(d = as.data.frame(reversed_edges),
-                                              vertices = all_nodes_df, 
-                                              directed = TRUE
-                                              )
-      plot(reversed_graph,
-           add = TRUE, 
-           layout = layout.coords,
-           vertex.size = 10,
-           vertex.color = "grey95",
-           vertex.frame.color = "grey40",
-           vertex.label.color = "grey10",
-           edge.color = "orange",
-           edge.width = 3,
-           edge.arrow.size = 0.3
-      )
+    # Draw False Positive (FP)
+    if (nrow(edges.fp) > 0) {
+      g.fp <- graph_from_data_frame(d = as.data.frame(edges.fp), vertices = nodes.df, directed = TRUE)
+      plot(
+        g.fp, 
+        add = TRUE, 
+        layout = layout.coords, 
+        vertex.size = 10,
+        vertex.color = "grey95",
+        vertex.frame.color = "grey40",
+        vertex.label.color = "grey10",
+        vertex.label = V(g.true)$name,
+        edge.color = "darkorange1",
+        edge.width = 3, 
+        edge.arrow.size = 0.4
+        )
+    }
+    
+    # Draw False Negative (FN)
+    if (nrow(edges.fn) > 0) {
+      g.fn <- graph_from_data_frame(d = as.data.frame(edges.fn), vertices = nodes.df, directed = TRUE)
+      plot(
+        g.fn, 
+        add = TRUE, 
+        layout = layout.coords, 
+        vertex.size = 10,
+        vertex.color = "grey95",
+        vertex.frame.color = "grey40",
+        vertex.label.color = "grey10",
+        vertex.label = V(g.true)$name,
+        edge.color = "cornflowerblue",
+        edge.width = 2, 
+        edge.arrow.size = 0.4
+        )
+    }
+    
+    # Draw Reversed Edges
+    if (nrow(edges.reversed) > 0) {
+      g.rev <- graph_from_data_frame(d = as.data.frame(edges.reversed), vertices = nodes.df, directed = TRUE)
+      plot(
+        g.rev, 
+        add = TRUE,
+        layout = layout.coords,
+        vertex.size = 10,
+        vertex.color = "grey95",
+        vertex.frame.color = "grey40",
+        vertex.label.color = "grey10",
+        vertex.label = V(g.true)$name,
+        edge.color = "blueviolet",
+        edge.width = 3,
+        edge.arrow.size = 0.4
+        )
     }
   }
-  return(invisible(diff_data))
+  return(invisible(edges.diff))
 }
 
 ######################  END Functions for Visualization  #######################
