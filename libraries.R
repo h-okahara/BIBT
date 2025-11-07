@@ -13,6 +13,7 @@ library(MASS)           # General modern applied statistics functions
 library(Matrix)         # Classes and methods for sparse matrices
 library(parallel)       # Support for parallel computation
 library(pg)             # Pólya-Gamma data augmentation in C++
+library(purrr)          # Import R codes of ICBT model (Spearing et al.,2023)
 library(Rcpp)           # Runs C++ code from R
 library(scales)         # Rescales data for visualization
 

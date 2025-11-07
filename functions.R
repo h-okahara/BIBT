@@ -3,7 +3,7 @@
 # of the following 15 functions:
 #
 # - For Constructing Each Model:
-#     CBT.cpp, CBT.R, BBT.cpp, BBT.R, BBT.Stan, BT.freq;
+#     IBT.cpp, IBT.R, BBT.cpp, BBT.R, BBT.Stan, BT.freq;
 # - For Running MCMC:
 #     run.MCMCs, plot.MCMCs, plot.posteriors, plot.ACFs, stats.posteriors, mcmc.extract, build.hodge_operators;
 # - For Simulations:
@@ -14,9 +14,9 @@
 #
 ######################  BEGIN Functions for each models  #######################
 
-###-----------------------------------------------###
-###    Cyclic Bradley-Terry (CBT) Model in C++    ###
-###-----------------------------------------------###
+###-----------------------------------------------------###
+###    Intransitive Bradley-Terry (IBT) Model in C++    ###
+###-----------------------------------------------------###
 
 ## INPUT:
 # X:            An N×N matrix where the (i,j) entry indicates that player i defeats player j;
@@ -35,7 +35,7 @@
 ## OUTPUT:
 # A list of MCMC samples for the parameters: omega, s, Phi, lambda, tau, nu, xi, grad, curl, M.
 
-CBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
+IBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
                           s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL,
                           lambda.prior = NULL, tau.prior = NULL, 
                           nu.prior = NULL, xi.prior = NULL) 
@@ -69,24 +69,23 @@ CBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NU
   D.ast_t <- t(D.ast)
   
   ## MCMC Sampling using C++
-  result.cpp <- CBT_Gibbs_cpp(mcmc = mcmc, burn = burn, thin = thin, 
+  result.cpp <- IBT_Gibbs_cpp(mcmc = mcmc, burn = burn, thin = thin, 
                               n_ij = X$n_ij, kappa = kappa, G = G, C_ast = C.ast, H = H, 
                               D_ast = as.matrix(D.ast), D_ast_t = as.matrix(D.ast_t), 
                               num_entities = N, num_pairs = num.pairs, num_triplets = num.triplets, num_free = num.free, 
                               s = s, sigma = sigma, Phi = Phi, 
                               lambda = lambda, tau = tau, nu = nu, xi = xi)
   
-  result <- list(s = result.cpp$s,
-                 weights = result.cpp$weights,
-                 Phi = result.cpp$Phi,
-                 lambda = result.cpp$lambda,
-                 tau = as.matrix(result.cpp$tau),
-                 nu = result.cpp$nu,
-                 xi = as.matrix(result.cpp$xi),
-                 grad = result.cpp$grad,
-                 curl = result.cpp$curl,
-                 M = result.cpp$M)
-  return(result)
+  list(s = result.cpp$s, 
+       weights = result.cpp$weights, 
+       Phi = result.cpp$Phi,
+       lambda = result.cpp$lambda, 
+       tau = as.matrix(result.cpp$tau), 
+       nu = result.cpp$nu,
+       xi = as.matrix(result.cpp$xi), 
+       grad = result.cpp$grad,
+       curl = result.cpp$curl,
+       M = result.cpp$M)
 }
 
 
@@ -133,18 +132,15 @@ BBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NU
                               num_entities = N, num_pairs = num.pairs,
                               s = s, sigma = sigma)
   
-  result <- list(s = result.cpp$s,
-                 grad = result.cpp$grad,
-                 M = result.cpp$M)
-  return(result)
+  list(s = result.cpp$s, grad = result.cpp$grad, M = result.cpp$M)
 }
  
  
 
 
-###---------------------------------------------###
-###    Cyclic Bradley-Terry (CBT) Model in R    ###
-###---------------------------------------------###
+###---------------------------------------------------###
+###    Intransitive Bradley-Terry (IBT) Model in R    ###
+###---------------------------------------------------###
 
 ## INPUT:
 # X:            An N×N matrix where the (i,j) entry indicates that player i defeats player j;
@@ -163,7 +159,7 @@ BBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NU
 ## OUTPUT:
 # A list of MCMC samples for the parameters: omega, s, Phi, lambda, tau, nu, xi, grad, curl, M.
 
-CBT.Gibbs.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
+IBT.Gibbs.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
                         s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL,
                         lambda.prior = NULL, tau.prior = NULL, 
                         nu.prior = NULL, xi.prior = NULL) 
@@ -190,9 +186,9 @@ CBT.Gibbs.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
   
   ## Build operators
   if(is.null(operators)) operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
-  G <- operators$G  # G = grad (num.pairs x N)
+  G <- operators$G          # G = grad (num.pairs x N)
   C.ast <- operators$C.ast  # C.ast = curl* (num.pairs x num.triplets)
-  H <- operators$H  # column space basis
+  H <- operators$H          # column space basis
   D.ast <- C.ast %*% H
   D.ast_t <- t(D.ast)
   
@@ -290,10 +286,9 @@ CBT.Gibbs.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
   }
   #=======================   END MCMC sampling   ===============================
   
-  result <- list(s = s.pos, weights = weights.pos, Phi = Phi.pos, 
-                 lambda = lambda.pos, tau = tau.pos, nu = nu.pos, xi = xi.pos, 
-                 grad = grad.pos, curl = curl.pos, M = M.pos)
-  return(result)
+  list(s = s.pos, weights = weights.pos, Phi = Phi.pos, 
+       lambda = lambda.pos, tau = tau.pos, nu = nu.pos, xi = xi.pos, 
+       grad = grad.pos, curl = curl.pos, M = M.pos)
 }
 
 
@@ -372,8 +367,7 @@ BBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
   }
   #=======================   END MCMC sampling   ===============================
   
-  result <- list(s = s.pos, grad = M.pos, M = M.pos)
-  return(result)
+  list(s = s.pos, grad = M.pos, M = M.pos)
 }
 
 
@@ -421,18 +415,17 @@ BBT.Stan <- function(X, num.chains = 1, mcmc = 10000, burn = 2000, thin = 1,
   
   ## Define the Bayesian Bradley-Terry (BBT) model in Stan
   model <- cmdstan_model("BBT.stan", dir = outdir)
-  fit <- model$sample(
-    data = data,
-    refresh = 0,
-    output_dir = outdir,
-    iter_sampling = mcmc-burn,
-    iter_warmup = burn,
-    chains = num.chains,
-    thin = thin
-  )
+  fit <- model$sample(data = data,
+                      refresh = 0,
+                      output_dir = outdir,
+                      chains = num.chains,
+                      iter_sampling = mcmc-burn,
+                      iter_warmup = burn,
+                      thin = thin)
   
   ## Extract samples from chains
   samples.pos <- fit$draws()
+  
   chains <- parallel::mclapply(1:num.chains, function(chain.id) {
     s.pos <- matrix(samples.pos[ , chain.id, paste0('s[', 1:N, ']')], ncol = N)
     s.pos <- s.pos - rowMeans(s.pos)
@@ -441,8 +434,123 @@ BBT.Stan <- function(X, num.chains = 1, mcmc = 10000, burn = 2000, thin = 1,
     
     list(s = s.pos, sigma = sigma.pos, grad = M.pos, M = M.pos)
   })
+  
   return(chains)
 }
+
+
+
+
+###----------------------------------------------------------###
+###    Intransitive Clustering Bradley-Terry (ICBT) Model    ### 
+###                                (Spearing et al.,2023)    ###
+###----------------------------------------------------------###
+
+## INPUT:
+# X:            An N×N matrix where the (i,j) entry indicates that player i defeats player j;
+# num.chains:   Number of independent MCMC chains to run;
+# mcmc:         Number of iterations;
+# burn:         Burn-in period;
+# thin:         A thinning interval;
+# operators:    A list containing basis matrices (G, C.ast, H, A);
+# seed:         Integer: Random seed for reproducibility.
+
+## OUTPUT:
+# A list of MCMC samples for the parameters: s, sigma, grad, M.
+
+ICBT.RJMCMC <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL, seed = 73,
+                        alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
+                        gamma_A = 1, lambda_A = 10, nu_A = 1)
+  {
+  ## Preparation
+  set.seed(seed)
+  entity.name <- unique(c(X$player1, X$player2))
+  N <- length(entity.name)  # number of entities
+  pairs <- t(combn(1:N, 2))
+  pairs_free.idx <- which(pairs[, 1] != 1)  # Indices of identifiable pairs
+  num.pairs <- nrow(pairs)
+  num.free <- choose(N-1,2)
+  num.sampling <- (mcmc - burn) / thin
+  num.burn1 <- floor(burn / 2)
+  num.burn2 <- ceiling(burn / 2)
+  
+  ## Calculate 'grad' and 'M' samples
+  if(is.null(operators)) operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
+  G <- operators$G
+  
+  ## Initial values
+  alpha    <- if(is.null(alpha))   1.5  else alpha
+  beta     <- if(is.null(beta))      2  else beta
+  gamma    <- if(is.null(gamma))     1  else gamma
+  lambda   <- if(is.null(lambda))    3  else lambda
+  gamma_A  <- if(is.null(gamma_A))   1  else gamma_A
+  lambda_A <- if(is.null(lambda_A)) 10  else lambda_A
+  nu_A     <- if(is.null(nu_A))      1  else nu_A
+  
+  ## Transform data matrix (X) to data frame (df)
+  data.list <- list()
+  X$player1.id <- match(X$player1, entity.name)
+  X$player2.id <- match(X$player2, entity.name)
+  
+  for (i in 1:nrow(X)) {
+    row <- X[i, ]
+    if (row$win1 > 0) {
+      p1_wins <- data.frame(gameId = NA,
+                            player1 = row$player1.id, score1 = 2,
+                            player2 = row$player2.id, score2 = 0)
+      data.list[[length(data.list) + 1]] <- p1_wins[rep(1, row$win1), ]
+    }
+    if (row$win2 > 0) {
+      p2_wins <- data.frame(gameId = NA,
+                            player1 = row$player2.id, score1 = 2,
+                            player2 = row$player1.id, score2 = 0)
+      data.list[[length(data.list) + 1]] <- p2_wins[rep(1, row$win2), ]
+    }
+  }
+  df <- do.call(rbind, data.list)
+  df$gameId <- rownames(df) <- 1:nrow(df)
+    
+  ## Fit the ICBT model using main_A
+  start.time <- Sys.time()
+  ICBT.results <- main_A(df = df, n = N,
+                         nsteps1 = num.burn1, nsteps2 = num.burn2, nSteps = num.sampling,
+                         rho = 1, s_m_step = 0.8, alloc_step = 0.5, rho_A = 1, alloc_step_A = 0.5,
+                         sigma_s_m = 3, sigma_s_m_A = 2, tau_A = 0.5, tau = 1, i_v_st = 0.3,
+                         alpha = alpha, beta = beta, gamma = gamma, lambda = lambda,
+                         gamma_A = gamma_A, lambda_A = lambda_A, nu_A = nu_A)
+  time.sec <- difftime(Sys.time(), start.time, units = "sec")
+  samples.pos <- ICBT.results$RJMCMC$model3
+  
+  ## Reconstruct Skill parameters
+  phi.pos     <- samples.pos$postPhi            # (max_A+1) × num.sampling
+  alloc_A.pos <- samples.pos$postAllocation_A   # N × num.sampling
+  col.idx     <- (1:num.sampling - 1) * nrow(phi.pos)
+  linear.idx  <- alloc_A.pos + rep(col.idx, each = nrow(phi.pos))
+  s.pos       <- matrix(phi.pos[linear.idx], nrow = N, ncol = num.sampling)
+  s.pos       <- s.pos - colMeans(s.pos) # centering
+  
+  ## Reconstruct Intransitive parameters
+  Theta.pos       <- samples.pos$postTheta      # max_K x num.sampling
+  alloc_theta.pos <- samples.pos$postAllocation # num.pairs_free x num.sampling
+  K.pos           <- samples.pos$postCl_df      # 1 x num.sampling
+  
+  theta.pos <- matrix(0, nrow = num.pairs, ncol = num.sampling)
+  theta.free <- matrix(0, nrow = num.free, ncol = num.sampling)
+  nonzero.idx <- which(alloc_theta.pos != 0)
+  if (length(nonzero.idx) > 0) {
+    alloc.idx       <- alloc_theta.pos[nonzero.idx]
+    col_nonzero.idx <- (nonzero.idx - 1) %/% num.free + 1
+    linear.idx      <- abs(alloc.idx) + (col_nonzero.idx - 1) * nrow(Theta.pos)
+    theta.free[nonzero.idx] <- Theta.pos[linear.idx] * sign(alloc.idx)
+    theta.pos[pairs_free.idx,] <- theta.free
+  }
+  grad.pos <- as.matrix(G %*% s.pos)
+  M.pos <- grad.pos + theta.pos
+  
+  list(time = as.numeric(time.sec), s = t(s.pos), theta = t(theta.pos), 
+       grad = t(grad.pos), curl = t(theta.pos), M = t(M.pos))
+}
+
 
 
 
@@ -468,7 +576,7 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE, draw.flag = FALSE, de
   N <- length(entity.name)  # number of entities
   reference <- entity.name[N] # fix the last entity
   citeModel <- BTm(data = X, outcome = cbind(win1, win2), player1, player2,
-                   formula = ~player, id = "player", refcat = reference)
+                   formula = ~player, id = "player", refcat = as.character(reference))
   
   ## Set up the plotting area
   par(mfrow = c(1, 1), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
@@ -521,7 +629,7 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE, draw.flag = FALSE, de
 
 ## INPUT:
 # model:        A character vector specifying which model to run MCMC.
-#               Defaults: c("CBT.cpp", "CBT.R", "BBT.cpp", "BBT.R", "BBT.Stan");
+#               Defaults: c("IBT.cpp", "IBT.R", "BBT.cpp", "BBT.R", "BBT.Stan");
 # num.chains:   Number of independent MCMC chains to run;
 # num.entities: Number of entities (e.g., items and players).
 # name:         A string representing the name of parameters;
@@ -544,54 +652,70 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE, draw.flag = FALSE, de
 ## OUTPUT:
 # A list of MCMC draws from multiple chains.
 
-run.MCMCs <- function(model = c("CBT.cpp", "CBT.R", "BBT.cpp", "BBT.R", "BBT.Stan"), 
+run.MCMCs <- function(model = c("IBT.cpp", "IBT.R", "ICBT", "BBT.cpp", "BBT.R", "BBT.Stan"), 
                       num.chains = 1, num.entities = NULL, name = NULL, 
                       MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
                       X, mcmc = 10000, burn = 2000, thin = 1, seed = 73,
-                      s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL, 
-                      tau.prior = NULL, lambda.prior = NULL, 
-                      nu.prior = NULL, xi.prior = NULL) {
+                      IBT.params = NULL, ICBT.params = NULL, BBT.params = NULL)
+  {
   start.time <- Sys.time()
   
-  if(!model %in% c("CBT.cpp", "CBT.R", "BBT.cpp", "BBT.R", "BBT.Stan")) {
-    stop(paste(model, "must be in (CBT.cpp, CBT.R, BBT.cpp, BBT.R, BBT.Stan)."))
+  if(!model %in% c("IBT.cpp", "IBT.R", "ICBT", "BBT.cpp", "BBT.R", "BBT.Stan")) {
+    stop(paste(model, "must be in (IBT.cpp, IBT.R, ICBT, BBT.cpp, BBT.R, BBT.Stan)."))
   }
   
   ## Run multiple MCMC chains for each model
-  if (model == "CBT.cpp") {
+  if (model == "IBT.cpp") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
-      CBT.Gibbs.cpp(X, mcmc = mcmc, burn = burn, thin = thin, 
-                    s.prior = s.prior, sigma.prior = sigma.prior, Phi.prior = Phi.prior, 
-                    tau.prior = tau.prior, lambda.prior = lambda.prior, 
-                    nu.prior = nu.prior, xi.prior = xi.prior)
+      IBT.Gibbs.cpp(X, mcmc = mcmc, burn = burn, thin = thin, operators = NULL,
+                    s.prior = IBT.params$s.prior, 
+                    sigma.prior = IBT.params$sigma.prior, 
+                    Phi.prior = IBT.params$Phi.prior, 
+                    tau.prior = IBT.params$tau.prior, 
+                    lambda.prior = IBT.params$lambda.prior, 
+                    nu.prior = IBT.params$nu.prior, 
+                    xi.prior = IBT.params$xi.prior)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
-  } else if (model == "CBT.R") {
+  } else if (model == "IBT.R") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
-      CBT.Gibbs.R(X, mcmc = mcmc, burn = burn, thin = thin,
-                  s.prior = s.prior, sigma.prior = sigma.prior, Phi.prior = Phi.prior, 
-                  tau.prior = tau.prior, lambda.prior = lambda.prior, 
-                  nu.prior = nu.prior, xi.prior = xi.prior)
+      IBT.Gibbs.R(X, mcmc = mcmc, burn = burn, thin = thin, operators = NULL,
+                  s.prior = IBT.params$s.prior, 
+                  sigma.prior = IBT.params$sigma.prior, 
+                  Phi.prior = IBT.params$Phi.prior, 
+                  tau.prior = IBT.params$tau.prior, 
+                  lambda.prior = IBT.params$lambda.prior, 
+                  nu.prior = IBT.params$nu.prior, 
+                  xi.prior = IBT.params$xi.prior)
+    }, mc.cores = min(num.chains, parallel::detectCores()-1))
+  } else if(model == "ICBT") {
+    chains <- parallel::mclapply(1:num.chains, function(chain.id) {
+      set.seed(seed + chain.id)
+      ICBT.RJMCMC(X, mcmc = mcmc, burn = burn, thin = thin, seed = seed,
+                  alpha = ICBT.params$alpha, 
+                  beta = ICBT.params$beta, 
+                  gamma = ICBT.params$gamma, 
+                  lambda = ICBT.params$lambda, 
+                  gamma_A = ICBT.params$gamma_A, 
+                  lambda_A = ICBT.params$lambda_A, 
+                  nu_A = ICBT.params$nu_A)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
   } else if (model == "BBT.cpp") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
       BBT.Gibbs.cpp(X, mcmc = mcmc, burn = burn, thin = thin,
-                    s.prior = s.prior, sigma.prior = sigma.prior)
+                    s.prior = BBT.params$s.prior, sigma.prior = BBT.params$sigma.prior)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
   }
   else if (model == "BBT.R") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
       BBT.Gibbs(X, mcmc = mcmc, burn = burn, thin = thin,
-                s.prior = s.prior, sigma.prior = sigma.prior)
+                s.prior = BBT.params$s.prior, sigma.prior = BBT.params$sigma.prior)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
   } else if (model == "BBT.Stan") {
-    chains <- BBT.Stan(X, num.chains = num.chains, mcmc = mcmc, burn = burn, 
-                       thin = thin, seed = seed)
-  } else if (model == "ICBT") {
-    
+    chains <- BBT.Stan(X, num.chains = num.chains, mcmc = mcmc, burn = burn, thin = thin, seed = seed)
   }
   
   ## Extract samples of specific parameter (name) from chains
@@ -646,7 +770,7 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, 
       }
     }
     mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "theta" || name == "grad" || name == "curl" || name == "M") {
     mcmc <- nrow(mcmc.chains[[1]])
     pairs <- t(combn(num.entities, 2))
     num.pairs <- nrow(pairs)
@@ -771,7 +895,7 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains = NULL,
       }
     }
     mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "theta" || name == "grad" || name == "curl" || name == "M") {
     mcmc <- nrow(mcmc.chains[[1]])
     pairs <- t(combn(num.entities, 2))
     num.pairs <- nrow(pairs)
@@ -902,7 +1026,7 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, n
       }
     }
     mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "theta" || name == "grad" || name == "curl" || name == "M") {
     mcmc <- nrow(mcmc.chains[[1]])
     pairs <- t(combn(num.entities, 2))
     num.pairs <- nrow(pairs)
@@ -1055,18 +1179,18 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
                                             triplets[,1], 
                                             triplets[,2], 
                                             triplets[,3]),
-                          Mean     = ifelse(!is.null(decimal), round(means, decimal), means),
-                          Median   = ifelse(!is.null(decimal), round(medians, decimal), medians),
-                          SD       = ifelse(!is.null(decimal), round(sds, decimal), sds),
+                          Mean     = if(!is.null(decimal)) round(means, decimal) else means,
+                          Median   = if(!is.null(decimal)) round(medians, decimal) else medians,
+                          SD       = if(!is.null(decimal)) round(sds, decimal) else sds,
                           CI       = if (CI) CI.str else NA_character_, check.names = FALSE
       )
       if (!silent.flag) print(stats, row.names = FALSE)
       if (!silent.flag) cat("----------------------------\n")
     }
-    outputs <- list(mean = ifelse(!is.null(decimal), round(means, decimal), means), 
-                    median = ifelse(!is.null(decimal), round(medians, decimal), medians))
+    outputs <- list(mean = if(!is.null(decimal)) round(means, decimal) else means, 
+                    median = if(!is.null(decimal)) round(medians, decimal) else medians)
     return(outputs)
-  } else if (name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "theta" || name == "grad" || name == "curl" || name == "M") {
     for (chain in 1:num.chains) {
       if (!silent.flag) cat("Chain", chain, "\n")
       mcmc <- nrow(mcmc.chains[[chain]])
@@ -1098,9 +1222,9 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
       }
       
       stats <- data.frame(Variable = paste0(name, "_", pairs[,1], pairs[,2]),
-                          Mean     = ifelse(!is.null(decimal), round(means, decimal), means),
-                          Median   = ifelse(!is.null(decimal), round(medians, decimal), medians),
-                          SD       = ifelse(!is.null(decimal), round(sds, decimal), sds),
+                          Mean     = if(!is.null(decimal)) round(means, decimal) else means,
+                          Median   = if(!is.null(decimal)) round(medians, decimal) else medians,
+                          SD       = if(!is.null(decimal)) round(sds, decimal) else sds,
                           CI       = if (CI) CI.str else NA_character_, check.names = FALSE
       )
       if (!silent.flag) print(stats, row.names = FALSE)
@@ -1115,8 +1239,8 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
       if (length(null.idx) > 0) means[null.idx] <- medians[null.idx] <- 0
     }
     
-    outputs <- list(mean = ifelse(!is.null(decimal), round(means, decimal), means), 
-                    median = ifelse(!is.null(decimal), round(medians, decimal), medians))
+    outputs <- list(mean = if(!is.null(decimal)) round(means, decimal) else means, 
+                    median = if(!is.null(decimal)) round(medians, decimal) else medians)
     return(outputs)
   } else if (name == "weights" || name == "lambda" || name == "nu") {
     for (chain in 1:num.chains) {
@@ -1148,16 +1272,16 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
       }
       
       stats <- data.frame(Variable = paste0(name, "_", 1:num.free),
-                          Mean     = ifelse(!is.null(decimal), round(means, decimal), means),
-                          Median   = ifelse(!is.null(decimal), round(medians, decimal), medians),
-                          SD       = ifelse(!is.null(decimal), round(sds, decimal), sds),
+                          Mean     = if(!is.null(decimal)) round(means, decimal) else means,
+                          Median   = if(!is.null(decimal)) round(medians, decimal) else medians,
+                          SD       = if(!is.null(decimal)) round(sds, decimal) else sds,
                           CI       = if (CI) CI.str else NA_character_, check.names = FALSE
       )
       if (!silent.flag) print(stats, row.names = FALSE)
       if (!silent.flag) cat("----------------------------\n")
     }
-    outputs <- list(mean = ifelse(!is.null(decimal), round(means, decimal), means), 
-                    median = ifelse(!is.null(decimal), round(medians, decimal), medians))
+    outputs <- list(mean = if(!is.null(decimal)) round(means, decimal) else means, 
+                    median = if(!is.null(decimal)) round(medians, decimal) else medians)
     return(outputs)
   } else if (name == "s") {
     for (chain in 1:num.chains) {
@@ -1189,16 +1313,15 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
       }
       
       stats <- data.frame(Variable = paste0(name, "_", 1:num.entities),
-                          Mean     = ifelse(!is.null(decimal), round(means, decimal), means),
-                          Median   = ifelse(!is.null(decimal), round(medians, decimal), medians),
-                          SD       = ifelse(!is.null(decimal), round(sds, decimal), sds),
-                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE
-      )
+                          Mean     = if(!is.null(decimal)) round(means, decimal) else means,
+                          Median   = if(!is.null(decimal)) round(medians, decimal) else medians,
+                          SD       = if(!is.null(decimal)) round(sds, decimal) else sds,
+                          CI       = if (CI) CI.str else NA_character_, check.names = FALSE)
       if (!silent.flag) print(stats, row.names = FALSE)
       if (!silent.flag) cat("----------------------------\n")
     }
-    outputs <- list(mean = ifelse(!is.null(decimal), round(means, decimal), means), 
-                    median = ifelse(!is.null(decimal), round(medians, decimal), medians))
+    outputs <- list(mean = if(!is.null(decimal)) round(means, decimal) else means, 
+                    median = if(!is.null(decimal)) round(medians, decimal) else medians)
     return(outputs)
   } else {
     for (chain in 1:num.chains) {
@@ -1229,16 +1352,16 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
       }
       
       stats <- data.frame(Variable = name,
-                          Mean     = ifelse(!is.null(decimal), round(means, decimal), means),
-                          Median   = ifelse(!is.null(decimal), round(medians, decimal), medians),
-                          SD       = ifelse(!is.null(decimal), round(sds, decimal), sds),
+                          Mean     = if(!is.null(decimal)) round(means, decimal) else means,
+                          Median   = if(!is.null(decimal)) round(medians, decimal) else medians,
+                          SD       = if(!is.null(decimal)) round(sds, decimal) else sds,
                           CI       = if (CI) CI.str else NA_character_, check.names = FALSE
       )
       if (!silent.flag) print(stats, row.names = FALSE)
       if (!silent.flag) cat("----------------------------\n")
     }
-    outputs <- list(mean = ifelse(!is.null(decimal), round(means, decimal), means), 
-                    median = ifelse(!is.null(decimal), round(medians, decimal), medians))
+    outputs <- list(mean = if(!is.null(decimal)) round(means, decimal) else means, 
+                    median = if(!is.null(decimal)) round(medians, decimal) else medians)
     return(outputs)
   }
 }
@@ -1291,7 +1414,7 @@ mcmc.extract <- function(chains = NULL, num.entities = NULL, name = NULL,
         }
       }
     }
-  } else if (name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "theta" || name == "grad" || name == "curl" || name == "M") {
     mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
     
     ## Compute Gelman-Rubin diagnostic (Rhat) and Effective Sample Size (ESS)
@@ -1686,15 +1809,15 @@ generate.artificial.data <- function(num.entities = NULL, s_interval = NULL, fre
 # freq.range:   Numeric vector of length 1 or 2. The range [min, max] for sampling
 #               the number of comparisons for each pair;
 # w.params:     A list of parameters for generating 'weights' depending on the 'setting':
-#               - "sparse":     Requires list(norm = ..., sparsity = ...);
-#               - "dense": Requires list(sd = ...).
+#               - "sparse": Requires list(norm = ..., sparsity = ...);
+#               - "dense":  Requires list(sd = ...).
 
 ## OUTPUT:
 # A list of length 'num.replica', where each element is a dataset.
 
 generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.entities = NULL, 
                                          setting = c("transitive", "sparse", "dense"), 
-                                         s.sd = 1, freq.range = NULL, w.params = NULL) 
+                                         s.sd = NULL, freq.range = NULL, w.params = NULL) 
   {
   ## Preparation
   if (!setting %in% c("transitive", "sparse", "dense")) {
@@ -1753,132 +1876,159 @@ generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.ent
 
 ## INPUT:
 # model:          A character vector specifying which model to run MCMC;
-#                 Defaults: c("CBT.cpp", "BBT.Stan");
+#                 Defaults: c("IBT.cpp", "BBT.Stan");
 # mcmc.chain:     A list of specific MCMC samples;
-# relations.true: a
-# time:           A numeric.
-# level:          The credible interval level (e.g., 0.95);
+# relations.true: A list or data frame containing the true parameter vectors (e.g., M, grad, curl).
+# time:           A numeric;
+# levels:         The credible interval levels (e.g., c(0.9, 0.95));
 # hpd:            Logical flag: if TRUE, return the Highest Posterior Density (HPD) interval;
 
 ## OUTPUT:
 # A data frame storing metrics (MSE, CP, Accuracy, Recall, Precision) for each model
 
-compute.metrics <- function(model = c("CBT.cpp", "BBT.Stan"), mcmc.chain = NULL, 
-                            relations.true = NULL, time = NULL, level = 0.95, hpd = TRUE)
+compute.metrics <- function(model = c("IBT.cpp", "BBT.Stan"), mcmc.chain = NULL, 
+                            relations.true = NULL, time = NULL, 
+                            levels = 0.95, hpd = TRUE)
   {
   ## Preparation
-  pr <- c((1-level)/2, 1-(1-level)/2)
-  M_true <- relations.true[,'M']
+  M_true    <- relations.true[,'M']
   grad_true <- relations.true[,'grad']
   curl_true <- relations.true[,'curl']
   
-  ## Compute each Credible Interval (grad, M)
-  if (hpd) {
-    mcmc.obj_M <- coda::as.mcmc(mcmc.chain$M)
-    hpd.int_M  <- coda::HPDinterval(mcmc.obj_M, prob = level)
-    M_hat.lower <- hpd.int_M[ , "lower"]
-    M_hat.upper <- hpd.int_M[ , "upper"]
-    
-    mcmc.obj_grad <- coda::as.mcmc(mcmc.chain$grad)
-    hpd.int_grad  <- coda::HPDinterval(mcmc.obj_grad, prob = level)
-    grad_hat.lower <- hpd.int_grad[ , "lower"]
-    grad_hat.upper <- hpd.int_grad[ , "upper"]
-  } else {
-    CI_M        <- apply(mcmc.chain$M, 2, quantile, probs = pr)
-    M_hat.lower <- CI_M[1, ]
-    M_hat.upper <- CI_M[2, ]
-    
-    CI_grad        <- apply(mcmc.chain$grad, 2, quantile, probs = pr)
-    grad_hat.lower <- CI_grad[1, ]
-    grad_hat.upper <- CI_grad[2, ]
-  }
-  CP_M.flag    <- mean(M_true >= M_hat.lower & M_true <= M_hat.upper)
-  CP_grad.flag <- mean(grad_true >= grad_hat.lower & grad_true <= grad_hat.upper)
-  
-  ## For Posterior Mean
+  ## Compute MSE and Accuracy
+  ## Posterior Mean
   M_hat.mean    <- apply(mcmc.chain$M, 2, mean)
   MSE_M.mean    <- mean((M_hat.mean - M_true)^2)
   Accuracy.mean <- mean(sign(M_hat.mean * M_true) > 0)
   grad_hat.mean <- apply(mcmc.chain$grad, 2, mean)
   MSE_grad.mean <- mean((grad_hat.mean - grad_true)^2)
   
-  ## For Posterior Median
+  ## Posterior Median
   M_hat.median    <- apply(mcmc.chain$M, 2, median)
   MSE_M.median    <- mean((M_hat.median - M_true)^2)
   Accuracy.median <- mean(sign(M_hat.median * M_true) > 0)
   grad_hat.median <- apply(mcmc.chain$grad, 2, median)
   MSE_grad.median <- mean((grad_hat.median - grad_true)^2)
   
-  ## Intrinsic Metrics for each model
-  if (model == "CBT.cpp") {
-    # Compute each Credible Interval (curl)
-    if (hpd) {
-      mcmc.obj_curl <- coda::as.mcmc(mcmc.chain$curl)
-      hpd.int_curl  <- coda::HPDinterval(mcmc.obj_curl, prob = level)
-      curl_hat.lower <- hpd.int_curl[ , "lower"]
-      curl_hat.upper <- hpd.int_curl[ , "upper"]
-    } else {
-      CI_curl <- apply(mcmc.chain$curl, 2, quantile, probs = pr)
-      curl_hat.lower <- CI_curl[1, ]
-      curl_hat.upper <- CI_curl[2, ]
-    }
-    CP_curl.flag <- mean(curl_true >= curl_hat.lower & curl_true <= curl_hat.upper)
-    
-    # For Recall/Precision
-    nonzero.idx_true <- which(curl_true != 0)
-    num.nonzero_true <- length(nonzero.idx_true)
-    nonzero.idx_hat <- which(curl_hat.lower > 0 | curl_hat.upper < 0)
-    num.nonzero_hat <- length(nonzero.idx_hat)
-    num.nonzero_detected <- length(intersect(nonzero.idx_true, nonzero.idx_hat))
-    
-    Recall <- ifelse(num.nonzero_true == 0, 0, num.nonzero_detected / num.nonzero_true)
-    Precision <- ifelse(num.nonzero_hat == 0, 0, num.nonzero_detected / num.nonzero_hat)
-    
-    # For Posterior Mean
-    curl_hat.mean <- apply(mcmc.chain$curl, 2, mean)
-    MSE_curl.mean <- mean((curl_hat.mean - curl_true)^2)
-    
-    # For Posterior Median
+  ## Intrinsic Metrics for the IBT model
+  if (model == "IBT.cpp") {
+    curl_hat.mean   <- apply(mcmc.chain$curl, 2, mean)
+    MSE_curl.mean   <- mean((curl_hat.mean - curl_true)^2)
     curl_hat.median <- apply(mcmc.chain$curl, 2, median)
     MSE_curl.median <- mean((curl_hat.median - curl_true)^2)
   } else {
     MSE_curl.mean <- MSE_curl.median <- NA
-    CP_curl.mean <- CP_curl.median <- NA
-    Recall <- NA
-    Precision <- NA
-    CP_curl.flag <- NA
   }
   
-  # Row for Posterior Mean
-  df.mean <- data.frame(Model        = model,
-                        Estimator    = "Mean",
-                        MSE_M        = MSE_M.mean,
-                        MSE_grad     = MSE_grad.mean,
-                        MSE_curl     = MSE_curl.mean,
-                        CP_M.flag    = CP_M.flag,
-                        CP_grad.flag = CP_grad.flag,
-                        CP_curl.flag = CP_curl.flag,
-                        Accuracy     = Accuracy.mean,
-                        Recall       = Recall,
-                        Precision    = Precision,
-                        Time         = time)
+  ## Define mcmc object
+  if (hpd) {
+    mcmc.obj_M    <- coda::as.mcmc(mcmc.chain$M)
+    mcmc.obj_grad <- coda::as.mcmc(mcmc.chain$grad)
+    if (model == "IBT.cpp") {
+      mcmc.obj_curl <- coda::as.mcmc(mcmc.chain$curl)
+    }
+  }
   
-  # Row for Posterior Median
-  df.median <- data.frame(Model        = model,
-                          Estimator    = "Median",
-                          MSE_M        = MSE_M.median,
-                          MSE_grad     = MSE_grad.median,
-                          MSE_curl     = MSE_curl.median,
-                          CP_M.flag    = CP_M.flag,
-                          CP_grad.flag = CP_grad.flag,
-                          CP_curl.flag = CP_curl.flag,
-                          Accuracy     = Accuracy.median,
-                          Recall       = Recall,
-                          Precision    = Precision,
-                          Time         = time)
-  return(rbind(df.mean, df.median))
+  ## Compute Metrics depending on 'levels' (CP, Recall, Precision)
+  results.levels <- list()
+  
+  for (level in levels) {
+    pr <- c((1-level)/2, 1-(1-level)/2)
+    
+    ## Compute Credible Interval (M, grad)
+    if (hpd) {
+      hpd.int_M   <- coda::HPDinterval(mcmc.obj_M, prob = level)
+      M_hat.lower <- hpd.int_M[, "lower"]
+      M_hat.upper <- hpd.int_M[, "upper"]
+      
+      hpd.int_grad   <- coda::HPDinterval(mcmc.obj_grad, prob = level)
+      grad_hat.lower <- hpd.int_grad[, "lower"]
+      grad_hat.upper <- hpd.int_grad[, "upper"]
+    } else {
+      CI_M        <- apply(mcmc.chain$M, 2, quantile, probs = pr)
+      M_hat.lower <- CI_M[1, ]
+      M_hat.upper <- CI_M[2, ]
+      
+      CI_grad        <- apply(mcmc.chain$grad, 2, quantile, probs = pr)
+      grad_hat.lower <- CI_grad[1, ]
+      grad_hat.upper <- CI_grad[2, ]
+    }
+    CP_M.flag    <- M_true >= M_hat.lower & M_true <= M_hat.upper
+    CP_grad.flag <- grad_true >= grad_hat.lower & grad_true <= grad_hat.upper
+    
+    ## Compute Credible Interval (curl)
+    if (model == "IBT.cpp") {
+      if (hpd) {
+        hpd.int_curl   <- coda::HPDinterval(mcmc.obj_curl, prob = level)
+        curl_hat.lower <- hpd.int_curl[, "lower"]
+        curl_hat.upper <- hpd.int_curl[, "upper"]
+      } else {
+        CI_curl        <- apply(mcmc.chain$curl, 2, quantile, probs = pr)
+        curl_hat.lower <- CI_curl[1, ]
+        curl_hat.upper <- CI_curl[2, ]
+      }
+      CP_curl.flag <- curl_true >= curl_hat.lower & curl_true <= curl_hat.upper
+      
+      # Recall/Precision
+      nonzero.idx_true     <- which(curl_true != 0)
+      num.nonzero_true     <- length(nonzero.idx_true)
+      nonzero.idx_hat      <- which(curl_hat.lower > 0 | curl_hat.upper < 0)
+      num.nonzero_hat      <- length(nonzero.idx_hat)
+      num.nonzero_detected <- length(intersect(nonzero.idx_true, nonzero.idx_hat))
+      
+      Recall    <- ifelse(num.nonzero_true == 0, 0, num.nonzero_detected / num.nonzero_true)
+      Precision <- ifelse(num.nonzero_hat == 0, 0, num.nonzero_detected / num.nonzero_hat)
+    } else {
+      CP_curl.flag <- rep(NA, length(curl_true))
+      Recall <- Precision <- NA
+    }
+    
+    ## Helper Function to store Coverage flag
+    make.CP_cols <- function(flag) {
+      v <- as.integer(flag)
+      as.data.frame(as.list(v), row.names = NULL, col.names = seq_along(v))
+      }
+    
+    ## Store results to data frame
+    df.mean <- data.frame(
+      Model        = model,
+      Estimator    = "Mean",
+      Level        = level,
+      MSE_M        = MSE_M.mean,
+      MSE_grad     = MSE_grad.mean,
+      MSE_curl     = MSE_curl.mean,
+      Accuracy     = Accuracy.mean,
+      Recall       = Recall,
+      Precision    = Precision,
+      Time         = time,
+      CP_M         = make.CP_cols(CP_M.flag),
+      CP_grad      = make.CP_cols(CP_grad.flag),
+      CP_curl      = make.CP_cols(CP_curl.flag)
+    )
+    
+    df.median <- data.frame(
+      Model        = model,
+      Estimator    = "Median",
+      Level        = level,
+      MSE_M        = MSE_M.median,
+      MSE_grad     = MSE_grad.median,
+      MSE_curl     = MSE_curl.median,
+      Accuracy     = Accuracy.median,
+      Recall       = Recall,
+      Precision    = Precision,
+      Time         = time,
+      CP_M         = make.CP_cols(CP_M.flag),
+      CP_grad      = make.CP_cols(CP_grad.flag),
+      CP_curl      = make.CP_cols(CP_curl.flag)
+    )
+    
+    results.levels[[as.character(level)]] <- rbind(df.mean, df.median)
+  }
+  
+  results <- do.call(rbind, results.levels)
+  row.names(results) <- NULL
+  return(results)
 }
-
 
 
 
@@ -1891,6 +2041,7 @@ compute.metrics <- function(model = c("CBT.cpp", "BBT.Stan"), mcmc.chain = NULL,
 # num.replica:  Integer. The number of replications (datasets) to generate;
 # num.entities: Number of entities (e.g., items and players);
 # setting:      String. The simulation setting: "transitive", "sparse", or "dense";
+# decimal:        Number of decimal places;
 # mcmc.params:  A list of parameters for MCMC: list(mcmc, burn, thin);
 # data.params:  A list of parameters for generating datasets: list(s.sd, freq.range, w.params);
 # model.params: A list of priors for 'model':
@@ -1900,20 +2051,24 @@ compute.metrics <- function(model = c("CBT.cpp", "BBT.Stan"), mcmc.chain = NULL,
 # A data frame storing the average of the replication results for 'num.replica' iterations
 
 run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL, 
-                           setting = c("transitive", "sparse", "dense"), 
-                           mcmc.params = NULL, data.params = NULL, model.params = NULL){
-  run.time <- Sys.time()
+                           setting = c("transitive", "sparse", "dense"), decimal = 4,
+                           mcmc.params = NULL, data.params = NULL, model.params = NULL)
+  {
   ## Preparation
-  mcmc <- mcmc.params$mcmc
-  burn <- mcmc.params$burn
-  thin <- mcmc.params$thin
-  s.prior <- model.params$s.prior
-  sigma.prior <- model.params$sigma.prior
-  Phi.prior <- model.params$Phi.prior
+  run.time <- Sys.time()
+  mcmc   <- mcmc.params$mcmc
+  burn   <- mcmc.params$burn
+  thin   <- mcmc.params$thin
+  levels <- mcmc.params$levels
+  hpd    <- mcmc.params$hpd
+  
+  s.prior      <- model.params$s.prior
+  sigma.prior  <- model.params$sigma.prior
+  Phi.prior    <- model.params$Phi.prior
   lambda.prior <- model.params$lambda.prior
-  tau.prior <- model.params$tau.prior
-  nu.prior <- model.params$nu.prior
-  xi.prior <- model.params$xi.prior
+  tau.prior    <- model.params$tau.prior
+  nu.prior     <- model.params$nu.prior
+  xi.prior     <- model.params$xi.prior
   operators <- build.hodge_operators(num.entities = num.entities, tol = 1e-10) # Build operators
   
   ## Generate Datasets
@@ -1935,18 +2090,18 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
     relations.true <- data_r$relations
     metrics.list <- list()
     
-    # Evaluate CBT.cpp
+    # Evaluate IBT.cpp
     start.time <- Sys.time()
     set.seed(r)
-    results.CBT <- CBT.Gibbs.cpp(X, mcmc = mcmc, burn = burn, thin = thin, operators = operators,
+    results.IBT <- IBT.Gibbs.cpp(X, mcmc = mcmc, burn = burn, thin = thin, operators = operators,
                                  s.prior = s.prior, sigma.prior = sigma.prior, 
                                  Phi.prior = Phi.prior, 
                                  lambda.prior = lambda.prior, tau.prior = tau.prior, 
                                  nu.prior = nu.prior, xi.prior = xi.prior)
     time.sec <- difftime(Sys.time(), start.time, units = "sec")
-    metrics.list$CBT <- compute.metrics(model = "CBT.cpp", results.CBT,
+    metrics.list$IBT <- compute.metrics(model = "IBT.cpp", results.IBT,
                                         relations.true, as.numeric(time.sec),
-                                        level = 0.95, hpd = TRUE)
+                                        level = levels, hpd = TRUE)
     
     # Evaluate BBT.Stan
     start.time <- Sys.time()
@@ -1955,7 +2110,7 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
     time.sec <- difftime(Sys.time(), start.time, units = "sec")
     metrics.list$BBT <- compute.metrics(model = "BBT.Stan", results.BBT[[1]],
                                         relations.true, as.numeric(time.sec),
-                                        level = 0.95, hpd = TRUE)
+                                        level = levels, hpd = TRUE)
     
     do.call(rbind, metrics.list)
   }, mc.cores = num.cores)
@@ -1963,11 +2118,52 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   ## Summary
   cat("Step 3: Aggregating results...\n\n")
   results.df <- do.call(rbind, Filter(Negate(is.null), results.list))
-  summary <- aggregate(. ~ Model + Estimator, data = results.df, FUN = mean, na.action = na.pass)
+  base.cols <- c("Model", "Estimator", "Level")
+  keep.cols <- c("MSE_M", "MSE_grad", "MSE_curl", "Accuracy", "Recall", "Precision", "Time")
+  drop.cols <- setdiff(names(results.df), c(base.cols, keep.cols))
+  
+  ## For Numerical Metrics (MSE, Accuracy, Recall, Precision, Time)
+  metrics.summary <- aggregate(as.data.frame(results.df[keep.cols]),
+                               by = results.df[base.cols],
+                               FUN = mean, 
+                               na.action = na.pass)
+  metrics.summary[keep.cols] <- round(metrics.summary[keep.cols], decimal)
+  metrics.summary <- metrics.summary[order(metrics.summary$Model), ]
+  row.names(metrics.summary) <- NULL
+  
+  ## For List Metrics (CP)
+  CP.summary <- aggregate(as.data.frame(results.df[drop.cols]),
+                          by = results.df[base.cols],
+                          FUN = mean,
+                          na.action = na.pass)
+  
+  ## Compute each Coverage Probability (CP)
+  CP_M.cols     <- names(CP.summary)[startsWith(names(CP.summary), "CP_M")]    # CP_M
+  CP_grad.cols  <- names(CP.summary)[startsWith(names(CP.summary), "CP_grad")] # CP_grad
+  CP_curl.cols  <- names(CP.summary)[startsWith(names(CP.summary), "CP_curl")] # CP_curl
+  
+  if (length(CP_M.cols) > 0) CP_M <- rowMeans(CP.summary[, CP_M.cols], na.rm = TRUE)
+  if (length(CP_grad.cols) > 0) CP_Grad <- rowMeans(CP.summary[, CP_grad.cols], na.rm = TRUE)
+  if (length(CP_curl.cols) > 0) {
+    CP_Curl <- rowMeans(CP.summary[, CP_curl.cols], na.rm = TRUE)
+    CP_Curl[is.nan(CP.summary$CP_Curl)] <- NA
+  }
+  CP.summary <- data.frame(
+    Model     = CP.summary$Model,
+    Estimator = CP.summary$Estimator,
+    Level     = CP.summary$Level,
+    CP_M      = round(CP_M, decimal),
+    CP_Grad   = round(CP_Grad, decimal),
+    CP_Curl   = round(CP_Curl, decimal)
+  )
+  CP.summary <- unique(CP.summary[, !(names(CP.summary) %in% "Estimator")])
+  CP.summary <- CP.summary[order(CP.summary$Model, CP.summary$Level), ]
+  row.names(CP.summary) <- NULL
   
   end.time <- difftime(Sys.time(), run.time, units = "sec")
-  cat("Simulation finished in", end.time, "seconds.\n") 
-  return(summary[order(summary$Model),]) # Sort in Model
+  cat("Simulation finished in", end.time, "seconds.\n")
+  
+  list(metrics = metrics.summary, CP = CP.summary)
 }
 
 ##############################  END Simulations  ###############################
