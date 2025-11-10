@@ -2081,6 +2081,11 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
                                            freq.range = data.params$freq.range,
                                            w.params = data.params$w.params)
   
+  relations.ratio <- Reduce("+", lapply(datasets, \(x) x$ratios)) / num.replica
+  relations.ratio <- round(colMeans(relations.ratio), 3)
+  cat(paste("Ratios of 'grad' vs 'curl' = ", relations.ratio[1], ":", relations.ratio[2], "\n"))
+  
+  
   ## Fit 'model' for each datasets
   cat(paste("Step 2: Running models on", num.replica, "datasets...\n"))
   results.list <- parallel::mclapply(1:num.replica, function(r) {
@@ -2119,51 +2124,61 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   cat("Step 3: Aggregating results...\n\n")
   results.df <- do.call(rbind, Filter(Negate(is.null), results.list))
   base.cols <- c("Model", "Estimator", "Level")
-  keep.cols <- c("MSE_M", "MSE_grad", "MSE_curl", "Accuracy", "Recall", "Precision", "Time")
-  drop.cols <- setdiff(names(results.df), c(base.cols, keep.cols))
+  type1.cols <- c("MSE_M", "MSE_grad", "MSE_curl", "Accuracy", "Time")
+  type2.cols <- c("Recall", "Precision")
+  type3.cols <- setdiff(names(results.df), c(base.cols, type1.cols, type2.cols))
   
-  ## For Numerical Metrics (MSE, Accuracy, Recall, Precision, Time)
-  metrics.summary <- aggregate(as.data.frame(results.df[keep.cols]),
-                               by = results.df[base.cols],
+  ## For Numerical Metrics (MSE, Accuracy, Time)
+  type1.summary <- aggregate(as.data.frame(results.df[type1.cols]),
+                               by = results.df[setdiff(base.cols, "Level")],
                                FUN = mean, 
                                na.action = na.pass)
-  metrics.summary[keep.cols] <- round(metrics.summary[keep.cols], decimal)
-  metrics.summary <- metrics.summary[order(metrics.summary$Model), ]
-  row.names(metrics.summary) <- NULL
+  type1.summary[type1.cols] <- round(type1.summary[type1.cols], decimal)
+  type1.summary <- type1.summary[order(type1.summary$Model), ]
+  row.names(type1.summary) <- NULL
+  
+  ## For Numerical Metrics (Recall, Precision)
+  type2.summary <- aggregate(as.data.frame(results.df[type2.cols]),
+                             by = results.df[base.cols],
+                             FUN = mean, 
+                             na.action = na.pass)
+  type2.summary[type2.cols] <- round(type2.summary[type2.cols], decimal)
+  type2.summary <- type2.summary[order(type2.summary$Model), ]
+  row.names(type2.summary) <- NULL
   
   ## For List Metrics (CP)
-  CP.summary <- aggregate(as.data.frame(results.df[drop.cols]),
+  type3.summary <- aggregate(as.data.frame(results.df[type3.cols]),
                           by = results.df[base.cols],
                           FUN = mean,
                           na.action = na.pass)
   
   ## Compute each Coverage Probability (CP)
-  CP_M.cols     <- names(CP.summary)[startsWith(names(CP.summary), "CP_M")]    # CP_M
-  CP_grad.cols  <- names(CP.summary)[startsWith(names(CP.summary), "CP_grad")] # CP_grad
-  CP_curl.cols  <- names(CP.summary)[startsWith(names(CP.summary), "CP_curl")] # CP_curl
+  CP_M.cols     <- names(type3.summary)[startsWith(names(type3.summary), "CP_M")]    # CP_M
+  CP_grad.cols  <- names(type3.summary)[startsWith(names(type3.summary), "CP_grad")] # CP_grad
+  CP_curl.cols  <- names(type3.summary)[startsWith(names(type3.summary), "CP_curl")] # CP_curl
   
-  if (length(CP_M.cols) > 0) CP_M <- rowMeans(CP.summary[, CP_M.cols], na.rm = TRUE)
-  if (length(CP_grad.cols) > 0) CP_Grad <- rowMeans(CP.summary[, CP_grad.cols], na.rm = TRUE)
+  if (length(CP_M.cols) > 0) CP_M <- rowMeans(type3.summary[, CP_M.cols], na.rm = TRUE)
+  if (length(CP_grad.cols) > 0) CP_Grad <- rowMeans(type3.summary[, CP_grad.cols], na.rm = TRUE)
   if (length(CP_curl.cols) > 0) {
-    CP_Curl <- rowMeans(CP.summary[, CP_curl.cols], na.rm = TRUE)
-    CP_Curl[is.nan(CP.summary$CP_Curl)] <- NA
+    CP_Curl <- rowMeans(type3.summary[, CP_curl.cols], na.rm = TRUE)
+    CP_Curl[is.nan(type3.summary$CP_Curl)] <- NA
   }
-  CP.summary <- data.frame(
-    Model     = CP.summary$Model,
-    Estimator = CP.summary$Estimator,
-    Level     = CP.summary$Level,
+  type3.summary <- data.frame(
+    Model     = type3.summary$Model,
+    Estimator = type3.summary$Estimator,
+    Level     = type3.summary$Level,
     CP_M      = round(CP_M, decimal),
     CP_Grad   = round(CP_Grad, decimal),
     CP_Curl   = round(CP_Curl, decimal)
   )
-  CP.summary <- unique(CP.summary[, !(names(CP.summary) %in% "Estimator")])
-  CP.summary <- CP.summary[order(CP.summary$Model, CP.summary$Level), ]
-  row.names(CP.summary) <- NULL
+  type3.summary <- unique(type3.summary[, !(names(type3.summary) %in% "Estimator")])
+  type3.summary <- type3.summary[order(type3.summary$Model, type3.summary$Level), ]
+  row.names(type3.summary) <- NULL
   
   end.time <- difftime(Sys.time(), run.time, units = "sec")
   cat("Simulation finished in", end.time, "seconds.\n")
   
-  list(metrics = metrics.summary, CP = CP.summary)
+  list(Metrics1 = type1.summary, Metrics2 = type2.summary, CP = type3.summary)
 }
 
 ##############################  END Simulations  ###############################

@@ -109,18 +109,18 @@ plot.reversed_edges(network.estimates$graphs, networks.true$graphs, networks.tru
 ## Setting
 num.cores    <- 10    # the number of cores to parallel
 num.replica  <- 100   # the number of datasets
-num.entities <- 30    # the number of entities
+num.entities <- 10    # the number of entities
 num.triplets <- choose(num.entities,3)
 num.free <- choose(num.entities-1,2)
 
 mcmc.params <- list(mcmc   = 10000,
                     burn   = 2000,
                     thin   = 1,
-                    levels = c(0.9, 0.95),
+                    levels = c(0.8, 0.9, 0.95),
                     hpd    = TRUE)
 data.params <- list(s.sd = 2.5,
                     freq.range = c(100, 100),
-                    w.params = list(norm = 6, sparsity = 0.95, sd = 2.5))
+                    w.params = list(norm = 6, sparsity = 0.9, sd = 1.5))
 model.params <- list(s.prior = rep(0, num.entities), 
                      sigma.prior = 2.5,
                      Phi.prior = rep(0, num.triplets), 
@@ -129,13 +129,12 @@ model.params <- list(s.prior = rep(0, num.entities),
                      nu.prior = rep(1, num.free), 
                      xi.prior = 1)
 
-
 setting = "transitive"    # Options: (transitive, sparse, dense)
 run.simulation(num.cores    = num.cores, 
                num.replica  = num.replica, 
                num.entities = num.entities, 
                setting      = setting,
-               decimal      = 4,
+               decimal      = 3,
                mcmc.params  = mcmc.params, 
                data.params  = data.params, 
                model.params = model.params)
@@ -146,7 +145,7 @@ run.simulation(num.cores    = num.cores,
                num.replica  = num.replica, 
                num.entities = num.entities, 
                setting      = setting,
-               decimal      = 4,
+               decimal      = 3,
                mcmc.params  = mcmc.params, 
                data.params  = data.params, 
                model.params = model.params)
@@ -157,7 +156,7 @@ run.simulation(num.cores    = num.cores,
                num.replica  = num.replica, 
                num.entities = num.entities, 
                setting      = setting,
-               decimal      = 4,
+               decimal      = 3,
                mcmc.params  = mcmc.params, 
                data.params  = data.params, 
                model.params = model.params)
