@@ -116,11 +116,11 @@ num.free <- choose(num.entities-1,2)
 mcmc.params <- list(mcmc   = 10000,
                     burn   = 2000,
                     thin   = 1,
-                    levels = c(0.8, 0.9, 0.95),
+                    levels = c(0.1, 0.2, 0.4, 0.5, 0.8, 0.9, 0.95),
                     hpd    = TRUE)
 data.params <- list(s.sd = 2.5,
                     freq.range = c(100, 100),
-                    w.params = list(norm = 6, sparsity = 0.9, sd = 1.5))
+                    w.params = list(norm = 6, sparsity = 0.8, sd = 1.5))
 model.params <- list(s.prior = rep(0, num.entities), 
                      sigma.prior = 2.5,
                      Phi.prior = rep(0, num.triplets), 

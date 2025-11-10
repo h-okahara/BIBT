@@ -1569,22 +1569,20 @@ build.hodge_operators <- function(num.entities = NULL, tol = 1e-10) {
 ###------------------------###
 
 ## INPUT:
-# num.entities: Number of entities (e.g., items and players).
+# num.entities: Number of entities (e.g., items and players)
+# operators:    A list containing basis matrices (G, C.ast, H, A);
 # weights:      A numeric vector of weights for the basis H.
 
 ## OUTPUT:
 # Phi: The constructed Phi vector of length num.triplets.
 
-compute.Phi.true <- function(num.entities = NULL, weights = NULL) {
+compute.Phi.true <- function(num.entities = NULL, operators = NULL, weights = NULL) {
   ## Preparation
   pairs <- t(combn(num.entities, 2))
   num.pairs <- nrow(pairs)
-  triplets <- t(combn(num.entities, 3))
-  num.triplets <- nrow(triplets)
-  if(num.triplets!=nrow(triplets)){stop("Number of triplets given len(s) is not equal to the length of Phi")}
   
   ## Build operators
-  operators <- build.hodge_operators(num.entities = num.entities, tol = 1e-10)
+  if(is.null(operators)) operators <- build.hodge_operators(num.entities)
   G <- operators$G  # G = grad (num.pairs x N)
   C.ast <- operators$C.ast  # C.ast = curl* (num.pairs x num.triplets)
   H <- operators$H  # column space basis
@@ -1602,20 +1600,22 @@ compute.Phi.true <- function(num.entities = NULL, weights = NULL) {
 # num.entities:   Number of entities (e.g., items and players);
 # norm:           The L2 norm for the final sparse Phi vector.
 # seed:           Integer: Random seed for reproducibility.
-# sparsity.level: Numeric.
-# maxit:          Numeric.
-# tol:            Numeric. A small tolerance value to determine
+# sparsity.level: Numeric. The target proportion of elements to set to zero;
+# maxit:          Numeric. Maximum number of iterations;
+# tol:            Numeric. A small tolerance value to determine;
+# operators:      A list containing basis matrices (G, C.ast, H, A).
 
 ## OUTPUT:
 # A sparse Phi vector that satisfies the model constraints.
 
 compute.spPhi.true <- function(num.entities = NULL, norm = NULL, seed = 1,
-                               sparsity.level = 0.9, maxit = 500, tol = 1e-10,s) {
+                               sparsity.level = 0.9, maxit = 500, tol = 1e-10,
+                               operators = NULL) {
   ## Preparation
   set.seed(seed)
   num.triplets <- choose(num.entities,3)
   num.free <- choose(num.entities-1,2)
-  operators <- build.hodge_operators(num.entities)
+  if(is.null(operators)) operators <- build.hodge_operators(num.entities)
   H <- operators$H
   
   ## Generate random vector from col(H)
@@ -1623,18 +1623,15 @@ compute.spPhi.true <- function(num.entities = NULL, norm = NULL, seed = 1,
   Phi <- as.vector(H %*% w)
   const <- sqrt(sum(Phi^2))
   if (const > 0) Phi <- Phi * (norm / const) # Normalization  
-  prox.L1 <- function(v, lambda) sign(v) * pmax(abs(v) - lambda, 0) # Soft-thresholding (Proximal operator)
 
   ## Optimization procedure
   for (iter in 1:maxit) {
     Phi.old <- Phi
-    
-    # Sparsification: set the threshold level based on quantile
-    lambda <- quantile(abs(Phi), probs = sparsity.level)
-    Phi.tmp <- prox.L1(Phi, lambda)
+    threshold <- quantile(abs(Phi), probs = sparsity.level, type = 1)
+    Phi.tmp <- Phi * (abs(Phi) > threshold)
     
     # Orthogonal projection back to col(H) via least square
-    w <- qr.solve(H, Phi.tmp)
+    w <- crossprod(H, Phi.tmp)
     Phi <- as.vector(H %*% w)
     const <- sqrt(sum(Phi^2))
     if (const > 0) Phi <- Phi * (norm / const) # Normalization
@@ -1656,6 +1653,7 @@ compute.spPhi.true <- function(num.entities = NULL, norm = NULL, seed = 1,
 
 ## INPUT:
 # num.entities: Number of entities (e.g., items and players).
+# operators:    A list containing basis matrices (G, C.ast, H, A);
 # freq.vec:     Integer vector of length choose(num.entities, 2);
 # s:            A N×1 vector representing the true score of each subject;
 # Phi.prior:    A num.triplets×1 vector representing the triangular parameters.
@@ -1663,16 +1661,14 @@ compute.spPhi.true <- function(num.entities = NULL, norm = NULL, seed = 1,
 ## OUTPUT:
 # A list containing relation and ratio matrices with ('grad','curl','M') and ('grad.ratio', 'curl.ratio') columns.
 
-compute.relations.true <- function(num.entities = NULL, s = NULL, Phi = NULL) {
+compute.relations.true <- function(num.entities = NULL, operators = NULL, s = NULL, Phi = NULL) {
   ## Preparation
   pairs <- t(combn(num.entities, 2))
   triplets <- t(combn(num.entities, 3))
   num.pairs <- nrow(pairs)
-  num.triplets <- nrow(triplets)
-  if(num.triplets!=length(Phi)){stop("Number of triplets given len(s) is not equal to the length of Phi")}
   
   ## Build operators
-  operators <- build.hodge_operators(num.entities = num.entities, tol = 1e-10)
+  if(is.null(operators)) operators <- build.hodge_operators(num.entities)
   G <- operators$G
   C.ast <- operators$C.ast
   
@@ -1734,6 +1730,7 @@ compute.M <- function(df = NULL) {
 
 ## INPUT:
 # num.entities: Number of entities (e.g., items and players);
+# operators:    A list containing basis matrices (G, C.ast, H, A);
 # s_interval:   Numeric. A single value or a vector of length 'num.entities' 
 #               specifying the true intrinsic parameters.
 # freq.pair:    Integer. A single value for all pairs, or a vector of length choose(num.entities, 2)
@@ -1744,13 +1741,13 @@ compute.M <- function(df = NULL) {
 # A list containing the true parameters and generated data: 
 # artificial.data, entity.names, s, weights, Phi, relations
 
-generate.artificial.data <- function(num.entities = NULL, s_interval = NULL, freq.pair = NULL, weights = NULL) {
+generate.artificial.data <- function(num.entities = NULL, operators = NULL,
+                                     s_interval = NULL, freq.pair = NULL, weights = NULL) 
+  {
   ## Preparation
   pairs <- t(combn(num.entities, 2))
   triplets <- t(combn(1:num.entities, 3))
   num.pairs <- nrow(pairs)        # number of unique (i,j) pairs
-  num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
-  num.free <- choose(num.entities-1,2)
   entity.names <- paste("Entity", 1:num.entities)
   freq.vec <- rep(freq.pair, num.pairs)
   
@@ -1764,15 +1761,19 @@ generate.artificial.data <- function(num.entities = NULL, s_interval = NULL, fre
   
   ## Define each parameter (s, Phi) and relations
   if (length(s_interval) == 1) {
-    s.true <- seq(from = s_interval, by = s_interval, length.out = num.entities)
+    s.true <- seq(from = s_interval, 
+                  by = s_interval, 
+                  length.out = num.entities)
     s.true <- s.true - mean(s.true) # centering
   } else if (length(s_interval) == num.entities) {
     s.true <- s_interval - mean(s_interval) # centering
   } else {
     stop(paste("'s_interval' must be a single number or a vector of length", num.entities))
   }
-  Phi.true <- compute.Phi.true(num.entities = num.entities, weights = weights)
-  relations.true <- compute.relations.true(num.entities = num.entities, s = s.true, Phi = Phi.true)
+  Phi.true <- compute.Phi.true(num.entities = num.entities, operators = operators, weights = weights)
+  relations.true <- compute.relations.true(num.entities = num.entities, 
+                                           operators = operators,
+                                           s = s.true, Phi = Phi.true)
   
   ## Generate comparison data
   p.vec <- 1 / (1 + exp(-relations.true$relations[,'M']))
@@ -1810,14 +1811,16 @@ generate.artificial.data <- function(num.entities = NULL, s_interval = NULL, fre
 #               the number of comparisons for each pair;
 # w.params:     A list of parameters for generating 'weights' depending on the 'setting':
 #               - "sparse": Requires list(norm = ..., sparsity = ...);
-#               - "dense":  Requires list(sd = ...).
+#               - "dense":  Requires list(sd = ...);
+# operators:    A list containing basis matrices (G, C.ast, H, A).
 
 ## OUTPUT:
 # A list of length 'num.replica', where each element is a dataset.
 
 generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.entities = NULL, 
                                          setting = c("transitive", "sparse", "dense"), 
-                                         s.sd = NULL, freq.range = NULL, w.params = NULL) 
+                                         s.sd = NULL, freq.range = NULL, w.params = NULL,
+                                         operators = NULL) 
   {
   ## Preparation
   if (!setting %in% c("transitive", "sparse", "dense")) {
@@ -1825,6 +1828,7 @@ generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.ent
   }
   num.pairs <- choose(num.entities, 2)
   num.free <- choose(num.entities-1, 2)
+  if(setting == "sparse" && is.null(operators)) operators <- build.hodge_operators(num.entities)
   
   ## Generate simulation datasets
   datasets <- parallel::mclapply(1:num.replica, function(r) {
@@ -1849,8 +1853,8 @@ generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.ent
       "sparse" = {  # Simulation 2
         if (is.null(w.params$norm) || is.null(w.params$sparsity)) stop("w.params for 'sparse' must contain 'norm' and 'sparsity'.")
         compute.spPhi.true(num.entities = num.entities, norm = w.params$norm, 
-                           seed = r, sparsity.level = w.params$sparsity
-                           )$weights
+                           seed = r, sparsity.level = w.params$sparsity, 
+                           operators = operators)$weights
       },
       "dense" = {  # Simulation 3
         if (is.null(w.params$sd)) stop("w.params for 'dense' must contain 'sd'.")
@@ -1860,6 +1864,7 @@ generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.ent
     
     ## Generate a true dataset
     generate.artificial.data(num.entities = num.entities, 
+                             operators = operators,
                              s_interval = s.vec, 
                              freq.pair = freq.vec, 
                              weights = weights)
@@ -2079,12 +2084,12 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
                                            setting = setting,
                                            s.sd = data.params$s.sd,
                                            freq.range = data.params$freq.range,
-                                           w.params = data.params$w.params)
+                                           w.params = data.params$w.params,
+                                           operators = operators)
   
   relations.ratio <- Reduce("+", lapply(datasets, \(x) x$ratios)) / num.replica
   relations.ratio <- round(colMeans(relations.ratio), 3)
   cat(paste("Ratios of 'grad' vs 'curl' = ", relations.ratio[1], ":", relations.ratio[2], "\n"))
-  
   
   ## Fit 'model' for each datasets
   cat(paste("Step 2: Running models on", num.replica, "datasets...\n"))
