@@ -43,11 +43,11 @@ Rcpp::List IBT_Gibbs_cpp(int mcmc, int burn, int thin,
                          const arma::sp_mat& G, const arma::sp_mat& C_ast, 
                          const arma::mat& H, const arma::mat& D_ast, const arma::mat& D_ast_t, 
                          int num_entities, int num_pairs, int num_triplets, int num_free,
-                         arma::vec s, double sigma, arma::vec Phi, 
+                         arma::vec s, double sigma, arma::vec weights, 
                          arma::vec lambda, double tau, arma::vec nu, double xi) 
   {
   // Initial values
-  arma::vec weights   = arma::zeros<arma::vec>(num_free);
+  arma::vec Phi       = H * weights;
   arma::vec grad_flow = G * s;
   arma::vec curl_flow = C_ast * Phi;
   arma::vec M_vec     = grad_flow + curl_flow;
@@ -57,6 +57,7 @@ Rcpp::List IBT_Gibbs_cpp(int mcmc, int burn, int thin,
   // Define matrices for posterior samples
   int mcmc_row = (mcmc-burn)/thin;
   arma::mat s_pos(mcmc_row, num_entities);
+  arma::vec sigma_pos(mcmc_row);
   arma::mat weights_pos(mcmc_row, num_free);
   arma::mat Phi_pos(mcmc_row, num_triplets);
   arma::mat lambda_pos(mcmc_row, num_free);
@@ -78,7 +79,6 @@ Rcpp::List IBT_Gibbs_cpp(int mcmc, int burn, int thin,
     // Updating omega: sample omega from Pólya-Gamma distribution
     arma::vec M_vec_abs_loop = arma::abs(M_vec);
     omega = pg::rpg_hybrid(n_ij, M_vec_abs_loop);
-    
     
     // Updating s: num_entities×1 score vector
     arma::sp_mat G_omega = G;
@@ -105,6 +105,10 @@ Rcpp::List IBT_Gibbs_cpp(int mcmc, int burn, int thin,
     s = arma::vec(mu_s.data(), mu_s.size()) + arma::vec(z_s.data(), z_s.size());
     s = s - arma::mean(s); // Identification
     
+    // Updating sigma:
+    double a_sigma = (1.0 + num_entities) / 2.0;
+    double b_sigma_rate = (1.0 + arma::dot(s, s)) / 2.0;
+    sigma = std::sqrt(1.0 / R::rgamma(a_sigma, 1.0 / b_sigma_rate));
     
     // Updating w: num.free × 1 weight vector
     arma::mat D_ast_omega = D_ast;
@@ -123,28 +127,23 @@ Rcpp::List IBT_Gibbs_cpp(int mcmc, int burn, int thin,
     weights = mu_w + z_w;
     Phi = H * weights;
     
-    
     // Updating lambda: num.free×1 vector
     arma::vec b_lambda_rate = 1.0 / nu + arma::pow(weights, 2) / (2 * tau * tau);
     lambda = arma::sqrt(1.0 / rgamma_vec(num_free, 1.0, b_lambda_rate));
     
-      
     // Updating tau:
     double a_tau = (num_free + 1.0) / 2.0;
     double S = arma::sum(arma::pow(weights / lambda, 2));
     double b_tau_rate = S / 2.0 + 1.0 / xi;
     tau = std::sqrt(1.0 / R::rgamma(a_tau, 1.0 / b_tau_rate));
     
-    
     // Updating nu: num.free×1 vector
     arma::vec b_nu_rate = 1.0 + 1.0 / arma::pow(lambda, 2);
     nu = 1.0 / rgamma_vec(num_free, 1.0, b_nu_rate);
     
-    
     // Updating xi:
     double b_xi_rate = 1.0 + 1.0 / (tau * tau);
     xi = 1.0 / R::rgamma(1.0, 1.0 / b_xi_rate);
-    
     
     // Updating other parameters
     grad_flow = G * s;
@@ -154,12 +153,13 @@ Rcpp::List IBT_Gibbs_cpp(int mcmc, int burn, int thin,
     // ------------------------  END Updating  ----------------------------------
     if (iter > burn && (iter-burn) % thin == 0) { // Store posterior samples
       s_pos.row(sample_idx)       = s.t();
+      sigma_pos[sample_idx]       = sigma;  // Store in vector
       weights_pos.row(sample_idx) = weights.t();
       Phi_pos.row(sample_idx)     = Phi.t();
       lambda_pos.row(sample_idx)  = lambda.t();
-      tau_pos[sample_idx]         = tau; // Store in vector
+      tau_pos[sample_idx]         = tau;    // Store in vector
       nu_pos.row(sample_idx)      = nu.t();
-      xi_pos[sample_idx]          = xi; // Store in vector
+      xi_pos[sample_idx]          = xi;     // Store in vector
       grad_pos.row(sample_idx)    = grad_flow.t();
       curl_pos.row(sample_idx)    = curl_flow.t();
       M_pos.row(sample_idx)       = M_vec.t();
@@ -170,6 +170,7 @@ Rcpp::List IBT_Gibbs_cpp(int mcmc, int burn, int thin,
   //=======================   END MCMC sampling   ==============================
   
   return Rcpp::List::create(Rcpp::Named("s")        = s_pos,
+                            Rcpp::Named("sigma")    = sigma_pos,
                             Rcpp::Named("weights")  = weights_pos,
                             Rcpp::Named("Phi")      = Phi_pos,
                             Rcpp::Named("lambda")   = lambda_pos,
@@ -203,6 +204,7 @@ Rcpp::List BBT_Gibbs_cpp(int mcmc, int burn, int thin,
   // Define matrices for posterior samples
   int mcmc_row = (mcmc-burn)/thin;
   arma::mat s_pos(mcmc_row, num_entities);
+  arma::vec sigma_pos(mcmc_row);
   arma::mat M_pos(mcmc_row, num_pairs);
   
   double sigma_sq = sigma * sigma;
@@ -215,7 +217,6 @@ Rcpp::List BBT_Gibbs_cpp(int mcmc, int burn, int thin,
     // Updating omega: sample omega from Pólya-Gamma distribution
     arma::vec M_vec_abs_loop = arma::abs(M_vec);
     omega = pg::rpg_hybrid(n_ij, M_vec_abs_loop);
-    
     
     // Updating s: num_entities×1 score vector
     arma::sp_mat G_omega = G;
@@ -242,6 +243,10 @@ Rcpp::List BBT_Gibbs_cpp(int mcmc, int burn, int thin,
     s = arma::vec(mu_s.data(), mu_s.size()) + arma::vec(z_s.data(), z_s.size());
     s = s - arma::mean(s); // Identification
     
+    // Updating sigma:
+    double a_sigma = (1.0 + num_entities) / 2.0;
+    double b_sigma_rate = (1.0 + arma::dot(s, s)) / 2.0;
+    sigma = std::sqrt(1.0 / R::rgamma(a_sigma, 1.0 / b_sigma_rate));
 
     // Updating other parameters
     M_vec = G * s;
@@ -249,6 +254,7 @@ Rcpp::List BBT_Gibbs_cpp(int mcmc, int burn, int thin,
     // ------------------------  END Updating  ----------------------------------
     if (iter > burn && (iter-burn) % thin == 0) { // Store posterior samples
       s_pos.row(sample_idx) = s.t();
+      sigma_pos[sample_idx] = sigma;  // Store in vector
       M_pos.row(sample_idx) = M_vec.t();
       
       sample_idx++;
@@ -256,7 +262,8 @@ Rcpp::List BBT_Gibbs_cpp(int mcmc, int burn, int thin,
   }
   //=======================   END MCMC sampling   ==============================
   
-  return Rcpp::List::create(Rcpp::Named("s")    = s_pos,
-                            Rcpp::Named("grad") = M_pos,
-                            Rcpp::Named("M")    = M_pos);
+  return Rcpp::List::create(Rcpp::Named("s")     = s_pos,
+                            Rcpp::Named("sigma") = sigma_pos,
+                            Rcpp::Named("grad")  = M_pos,
+                            Rcpp::Named("M")     = M_pos);
 }

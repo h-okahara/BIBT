@@ -19,26 +19,25 @@
 ###-----------------------------------------------------###
 
 ## INPUT:
-# X:            An N×N matrix where the (i,j) entry indicates that player i defeats player j;
-# mcmc:         Number of iterations;
-# burn:         Burn-in period;
-# thin:         A thinning interval;
-# operators:    A list containing basis matrices (G, C.ast, H, A);
-# s.prior:      A N×1 vector representing the score of each subject;
-# sigma.prior:  A scalar representing variance of score s_t for t=1,...,N;
-# Phi.prior:    A num.triplets×1 vector representing the triangular parameters;
-# lambda.prior: A num.free×1 vector representing the local-shrinkage parameters;
-# tau.prior:    A scalar representing the global-shrinkage parameters;
-# nu.prior:     A num.free×1 vector representing the scalar of lambda.prior;
-# xi.prior:     A scalar representing the scalar of tau.prior.
+# X:              An N×N matrix where the (i,j) entry indicates that player i defeats player j;
+# mcmc:           Number of iterations;
+# burn:           Burn-in period;
+# thin:           A thinning interval;
+# operators:      A list containing basis matrices (G, C.ast, H, A);
+# s.prior:        A N×1 vector representing the score of each subject;
+# sigma.prior:    A scalar representing variance of score s_t for t=1,...,N;
+# weights.prior:  A num.free×1 vector representing the weights of the basis in H;
+# lambda.prior:   A num.free×1 vector representing the local-shrinkage parameters;
+# tau.prior:      A scalar representing the global-shrinkage parameters;
+# nu.prior:       A num.free×1 vector representing the scalar of lambda.prior;
+# xi.prior:       A scalar representing the scalar of tau.prior.
 
 ## OUTPUT:
 # A list of MCMC samples for the parameters: omega, s, Phi, lambda, tau, nu, xi, grad, curl, M.
 
-IBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
-                          s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL,
-                          lambda.prior = NULL, tau.prior = NULL, 
-                          nu.prior = NULL, xi.prior = NULL) 
+IBT.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
+                    s.prior = NULL, sigma.prior = NULL, weights.prior = NULL,
+                    lambda.prior = NULL, tau.prior = NULL, nu.prior = NULL, xi.prior = NULL) 
   {
   ## Preparation
   entity.name <- unique(c(X$player1, X$player2))
@@ -49,17 +48,6 @@ IBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NU
   num.triplets <- nrow(triplets) # number of unique (i,j,k) triplets
   num.free <- choose(N-1, 2)
   
-  ## Initial values
-  omega <- rep(0, num.pairs)
-  kappa <- X$y_ij - X$n_ij/2
-  s      <- if(is.null(s.prior))  rep(0, N) else s.prior
-  sigma  <- if(is.null(sigma.prior))  1 else sigma.prior
-  Phi    <- if(is.null(Phi.prior))  rep(0, num.triplets)  else Phi.prior
-  lambda <- if(is.null(lambda.prior)) rep(1, num.free) else lambda.prior
-  tau    <- if(is.null(tau.prior))  1  else tau.prior
-  nu     <- if(is.null(nu.prior)) rep(1, num.free) else nu.prior
-  xi     <- if(is.null(xi.prior)) 1 else xi.prior
-  
   ## Build operators
   if(is.null(operators)) operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
   G <- operators$G
@@ -68,24 +56,37 @@ IBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NU
   D.ast <- C.ast %*% H
   D.ast_t <- t(D.ast)
   
+  ## Initial values
+  omega <- rep(0, num.pairs)
+  kappa <- X$y_ij - X$n_ij/2
+  s      <- if(is.null(s.prior))  rep(0, N) else s.prior
+  sigma   <- if(is.null(sigma.prior))  2.5 else sigma.prior
+  weights <- if(is.null(weights.prior))  rep(0,num.free) else weights.prior
+  Phi     <- H %*% weights
+  lambda <- if(is.null(lambda.prior)) rep(1, num.free) else lambda.prior
+  tau    <- if(is.null(tau.prior))  1  else tau.prior
+  nu     <- if(is.null(nu.prior)) rep(1, num.free) else nu.prior
+  xi     <- if(is.null(xi.prior)) 1 else xi.prior
+  
   ## MCMC Sampling using C++
   result.cpp <- IBT_Gibbs_cpp(mcmc = mcmc, burn = burn, thin = thin, 
                               n_ij = X$n_ij, kappa = kappa, G = G, C_ast = C.ast, H = H, 
                               D_ast = as.matrix(D.ast), D_ast_t = as.matrix(D.ast_t), 
                               num_entities = N, num_pairs = num.pairs, num_triplets = num.triplets, num_free = num.free, 
-                              s = s, sigma = sigma, Phi = Phi, 
+                              s = s, sigma = sigma, weights = weights,
                               lambda = lambda, tau = tau, nu = nu, xi = xi)
   
-  list(s = result.cpp$s, 
+  list(s       = result.cpp$s, 
+       sigma   = result.cpp$sigma,
        weights = result.cpp$weights, 
-       Phi = result.cpp$Phi,
-       lambda = result.cpp$lambda, 
-       tau = as.matrix(result.cpp$tau), 
-       nu = result.cpp$nu,
-       xi = as.matrix(result.cpp$xi), 
-       grad = result.cpp$grad,
-       curl = result.cpp$curl,
-       M = result.cpp$M)
+       Phi     = result.cpp$Phi,
+       lambda  = result.cpp$lambda, 
+       tau     = as.matrix(result.cpp$tau), 
+       nu      = result.cpp$nu,
+       xi      = as.matrix(result.cpp$xi), 
+       grad    = result.cpp$grad,
+       curl    = result.cpp$curl,
+       M       = result.cpp$M)
 }
 
 
@@ -107,8 +108,8 @@ IBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NU
 ## OUTPUT:
 # A list of MCMC samples for the parameters: omega, s, grad, M.
 
-BBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
-                          s.prior = NULL, sigma.prior = NULL) 
+BBT.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
+                    s.prior = NULL, sigma.prior = NULL) 
   {
   ## Preparation
   entity.name <- unique(c(X$player1, X$player2))
@@ -116,15 +117,15 @@ BBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NU
   pairs <- t(combn(N, 2))
   num.pairs <- nrow(pairs)      # number of unique (i,j) pairs
   
+  ## Build operators
+  if(is.null(operators)) operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
+  G <- operators$G
+  
   ## Initial values
   omega <- rep(0, num.pairs)
   kappa <- X$y_ij - X$n_ij/2
   s      <- if(is.null(s.prior))  rep(0, N) else s.prior
   sigma  <- if(is.null(sigma.prior))  1 else sigma.prior
-  
-  ## Build operators
-  if(is.null(operators)) operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
-  G <- operators$G
   
   ## MCMC Sampling using C++
   result.cpp <- BBT_Gibbs_cpp(mcmc = mcmc, burn = burn, thin = thin, 
@@ -132,7 +133,7 @@ BBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NU
                               num_entities = N, num_pairs = num.pairs,
                               s = s, sigma = sigma)
   
-  list(s = result.cpp$s, grad = result.cpp$grad, M = result.cpp$M)
+  list(s = result.cpp$s, sigma = result.cpp$sigma, grad = result.cpp$grad, M = result.cpp$M)
 }
  
  
@@ -143,26 +144,26 @@ BBT.Gibbs.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NU
 ###---------------------------------------------------###
 
 ## INPUT:
-# X:            An N×N matrix where the (i,j) entry indicates that player i defeats player j;
-# mcmc:         Number of iterations;
-# burn:         Burn-in period;
-# thin:         A thinning interval;
-# operators:    A list containing basis matrices (G, C.ast, H, A);
-# s.prior:      A N×1 vector representing the score of each subject;
-# sigma.prior:  A scalar representing variance of score s_t for t=1,...,N;
-# Phi.prior:    A num.triplets×1 vector representing the triangular parameters;
-# lambda.prior: A num.free×1 vector representing the local-shrinkage parameters;
-# tau.prior:    A scalar representing the global-shrinkage parameters;
-# nu.prior:     A num.free×1 vector representing the scalar of lambda.prior;
-# xi.prior:     A scalar representing the scalar of tau.prior.
+# X:              An N×N matrix where the (i,j) entry indicates that player i defeats player j;
+# mcmc:           Number of iterations;
+# burn:           Burn-in period;
+# thin:           A thinning interval;
+# operators:      A list containing basis matrices (G, C.ast, H, A);
+# s.prior:        A N×1 vector representing the score of each subject;
+# sigma.prior:    A scalar representing variance of score s_t for t=1,...,N;
+# weights.prior:  A num.free×1 vector representing the weights of the basis in H;
+# lambda.prior:   A num.free×1 vector representing the local-shrinkage parameters;
+# tau.prior:      A scalar representing the global-shrinkage parameters;
+# nu.prior:       A num.free×1 vector representing the scalar of lambda.prior;
+# xi.prior:       A scalar representing the scalar of tau.prior.
 
 ## OUTPUT:
-# A list of MCMC samples for the parameters: omega, s, Phi, lambda, tau, nu, xi, grad, curl, M.
+# A list of MCMC samples for the parameters: omega, s, w, Phi, lambda, tau, nu, xi, grad, curl, M.
 
-IBT.Gibbs.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
-                        s.prior = NULL, sigma.prior = NULL, Phi.prior = NULL,
-                        lambda.prior = NULL, tau.prior = NULL, 
-                        nu.prior = NULL, xi.prior = NULL) 
+IBT.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
+                  s.prior = NULL, sigma.prior = NULL, weights.prior = NULL,
+                  lambda.prior = NULL, tau.prior = NULL, 
+                  nu.prior = NULL, xi.prior = NULL) 
   {
   ## Preparation
   entity.name <- unique(c(X$player1, X$player2))
@@ -173,17 +174,6 @@ IBT.Gibbs.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
   num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
   num.free <- choose(N-1,2)
   
-  ## Initial values
-  omega <- rep(0, num.pairs)
-  kappa <- X$y_ij - X$n_ij/2
-  s      <- if(is.null(s.prior))  rep(0, N) else s.prior
-  sigma  <- if(is.null(sigma.prior))  1 else sigma.prior
-  Phi    <- if(is.null(Phi.prior))  rep(0, num.triplets)  else Phi.prior
-  lambda <- if(is.null(lambda.prior)) rep(1, num.free) else lambda.prior
-  tau    <- if(is.null(tau.prior))  1  else tau.prior
-  nu     <- if(is.null(nu.prior)) rep(1, num.free) else nu.prior
-  xi     <- if(is.null(xi.prior)) 1 else xi.prior
-  
   ## Build operators
   if(is.null(operators)) operators <- build.hodge_operators(num.entities = N, tol = 1e-10)
   G <- operators$G          # G = grad (num.pairs x N)
@@ -191,6 +181,18 @@ IBT.Gibbs.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
   H <- operators$H          # column space basis
   D.ast <- C.ast %*% H
   D.ast_t <- t(D.ast)
+  
+  ## Initial values
+  omega <- rep(0, num.pairs)
+  kappa <- X$y_ij - X$n_ij/2
+  s       <- if(is.null(s.prior))  rep(0, N) else s.prior
+  sigma   <- if(is.null(sigma.prior))  2.5 else sigma.prior
+  weights <- if(is.null(weights.prior))  rep(0,num.free) else weights.prior
+  Phi     <- H %*% weights
+  lambda  <- if(is.null(lambda.prior)) rep(1, num.free) else lambda.prior
+  tau     <- if(is.null(tau.prior))  1  else tau.prior
+  nu      <- if(is.null(nu.prior)) rep(1, num.free) else nu.prior
+  xi      <- if(is.null(xi.prior)) 1 else xi.prior
   
   ## Match-up function: M = grad s + curl* \Phi = Gs + C.ast \Phi
   grad.flow <- as.vector(G %*% s)
@@ -200,6 +202,7 @@ IBT.Gibbs.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
   ## Define matrices for posterior samples
   mcmc.row <- as.integer((mcmc-burn) / thin)
   s.pos         <- matrix(0, nrow = mcmc.row, ncol = N)
+  sigma.pos     <- matrix(0, nrow = mcmc.row, ncol = 1)
   weights.pos   <- matrix(0, nrow = mcmc.row, ncol = num.free)
   Phi.pos       <- matrix(0, nrow = mcmc.row, ncol = num.triplets)
   lambda.pos    <- matrix(0, nrow = mcmc.row, ncol = num.free)
@@ -229,6 +232,11 @@ IBT.Gibbs.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
     z_s <- backsolve(U_s, v_s)
     s <- mu_s + z_s
     s <- s - mean(s)  # Identification
+    
+    ## Updating sigma:
+    a_sigma <- (1 + N)/2
+    b_sigma <- (1 + as.numeric(crossprod(s)))/2
+    sigma <- sqrt(1/rgamma(1, shape = a_sigma, rate = b_sigma))
     
     ## Updating w: num.free × 1 weight vector
     Prec_likelihood <- D.ast_t %*% (omega * D.ast)
@@ -272,12 +280,13 @@ IBT.Gibbs.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
       
       ## Store posterior samples
       s.pos[sample.idx, ]         <- as.vector(s)
+      sigma.pos[sample.idx, ]     <- as.numeric(sigma)
       weights.pos[sample.idx, ]   <- as.vector(weights)
       Phi.pos[sample.idx, ]       <- as.vector(Phi)
       lambda.pos[sample.idx, ]    <- as.vector(lambda)
       tau.pos[sample.idx, ]       <- as.vector(tau)
-      nu.pos[sample.idx, ]        <- as.vector(nu)
-      xi.pos[sample.idx, ]        <- as.vector(xi)
+      nu.pos[sample.idx, ]        <- as.numeric(nu)
+      xi.pos[sample.idx, ]        <- as.numeric(xi)
       
       grad.pos[sample.idx,]       <- as.vector(grad.flow)
       curl.pos[sample.idx,]       <- as.vector(curl.flow)
@@ -286,7 +295,7 @@ IBT.Gibbs.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
   }
   #=======================   END MCMC sampling   ===============================
   
-  list(s = s.pos, weights = weights.pos, Phi = Phi.pos, 
+  list(s = s.pos, sigma = sigma.pos, weights = weights.pos, Phi = Phi.pos, 
        lambda = lambda.pos, tau = tau.pos, nu = nu.pos, xi = xi.pos, 
        grad = grad.pos, curl = curl.pos, M = M.pos)
 }
@@ -310,8 +319,8 @@ IBT.Gibbs.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
 ## OUTPUT:
 # A list of MCMC samples for the parameters: omega, s, grad, M.
 
-BBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
-                      s.prior = NULL, sigma.prior = NULL) {
+BBT.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
+                  s.prior = NULL, sigma.prior = NULL) {
   ## Preparation
   entity.name <- unique(c(X$player1, X$player2))
   N <- length(entity.name)  # number of entities
@@ -332,6 +341,7 @@ BBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
   ## Define matrices for posterior samples
   mcmc.row  <- as.integer((mcmc-burn) / thin)
   s.pos     <- matrix(0, nrow = mcmc.row, ncol = N)
+  sigma.pos <- matrix(0, nrow = mcmc.row, ncol = 1)
   M.pos     <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
   
   sample.idx <- 0
@@ -353,6 +363,11 @@ BBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
     s <- mu_s + z_s
     s <- s - mean(s)  # Identification
     
+    ## Updating sigma:
+    a_sigma <- (1 + N)/2
+    b_sigma <- (1 + as.numeric(crossprod(s)))/2
+    sigma <- sqrt(1/rgamma(1, shape = a_sigma, rate = b_sigma))
+    
     ## Updating other parameters
     M.vec <- as.vector(G %*% s)
     
@@ -361,13 +376,14 @@ BBT.Gibbs <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
       sample.idx <- sample.idx + 1
       
       ## Store posterior samples
-      s.pos[sample.idx, ] <- as.vector(s)
-      M.pos[sample.idx, ] <- as.vector(M.vec)
+      s.pos[sample.idx, ]     <- as.vector(s)
+      sigma.pos[sample.idx, ] <- as.numeric(sigma)
+      M.pos[sample.idx, ]     <- as.vector(M.vec)
     }
   }
   #=======================   END MCMC sampling   ===============================
   
-  list(s = s.pos, grad = M.pos, M = M.pos)
+  list(s = s.pos, sigma = sigma.pos, grad = M.pos, M = M.pos)
 }
 
 
@@ -427,10 +443,10 @@ BBT.Stan <- function(X, num.chains = 1, mcmc = 10000, burn = 2000, thin = 1,
   samples.pos <- fit$draws()
   
   chains <- parallel::mclapply(1:num.chains, function(chain.id) {
-    s.pos <- matrix(samples.pos[ , chain.id, paste0('s[', 1:N, ']')], ncol = N)
-    s.pos <- s.pos - rowMeans(s.pos)
+    s.pos     <- matrix(samples.pos[ , chain.id, paste0('s[', 1:N, ']')], ncol = N)
+    s.pos     <- s.pos - rowMeans(s.pos)
     sigma.pos <- matrix(samples.pos[ , chain.id, 'sigma'], ncol = 1)
-    M.pos <- matrix(samples.pos[ , chain.id, paste0('M[', 1:num.pairs, ']')], ncol = num.pairs)
+    M.pos     <- matrix(samples.pos[ , chain.id, paste0('M[', 1:num.pairs, ']')], ncol = num.pairs)
     
     list(s = s.pos, sigma = sigma.pos, grad = M.pos, M = M.pos)
   })
@@ -453,17 +469,16 @@ BBT.Stan <- function(X, num.chains = 1, mcmc = 10000, burn = 2000, thin = 1,
 # burn:         Burn-in period;
 # thin:         A thinning interval;
 # operators:    A list containing basis matrices (G, C.ast, H, A);
-# seed:         Integer: Random seed for reproducibility.
+# others:        Hyperparameters of the ICBT model e.g., alpha,beta,....
 
 ## OUTPUT:
 # A list of MCMC samples for the parameters: s, sigma, grad, M.
 
-ICBT.RJMCMC <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL, seed = 73,
+ICBT.RJMCMC <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
                         alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
                         gamma_A = 1, lambda_A = 10, nu_A = 1)
   {
   ## Preparation
-  set.seed(seed)
   entity.name <- unique(c(X$player1, X$player2))
   N <- length(entity.name)  # number of entities
   pairs <- t(combn(1:N, 2))
@@ -514,8 +529,9 @@ ICBT.RJMCMC <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
   start.time <- Sys.time()
   ICBT.results <- main_A(df = df, n = N,
                          nsteps1 = num.burn1, nsteps2 = num.burn2, nSteps = num.sampling,
-                         rho = 1, s_m_step = 0.8, alloc_step = 0.5, rho_A = 1, alloc_step_A = 0.5,
-                         sigma_s_m = 3, sigma_s_m_A = 2, tau_A = 0.5, tau = 1, i_v_st = 0.3,
+                         rho = 1, s_m_step = 0.8, alloc_step = 0.5, 
+                         rho_A = 1, alloc_step_A = 0.5, sigma_s_m = 3, sigma_s_m_A = 2, 
+                         tau_A = 0.5, tau = 1, i_v_st = 0.3,
                          alpha = alpha, beta = beta, gamma = gamma, lambda = lambda,
                          gamma_A = gamma_A, lambda_A = lambda_A, nu_A = nu_A)
   time.sec <- difftime(Sys.time(), start.time, units = "sec")
@@ -628,26 +644,26 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE, draw.flag = FALSE, de
 ###-----------------------------------------###
 
 ## INPUT:
-# model:        A character vector specifying which model to run MCMC.
-#               Defaults: c("IBT.cpp", "IBT.R", "BBT.cpp", "BBT.R", "BBT.Stan");
-# num.chains:   Number of independent MCMC chains to run;
-# num.entities: Number of entities (e.g., items and players).
-# name:         A string representing the name of parameters;
-# MCMC.plot     Logical flag: if TRUE, print MCMC sample paths for the specified parameters;
-# rhat:         Logical flag: if TRUE, compute and print Rhat values;
-# ess:          Logical flag: if TRUE, compute and print Effective Sample Size (ESS);
-# X:            An N×N matrix where the (i, j) entry indicates that player i defeats player j;
-# mcmc:         Number of iterations;
-# burn:         Burn-in period;
-# thin:         A thinning interval;
-# seed:         Integer: Random seed for reproducibility.
-# s.prior:      A N×1 vector representing the score of each subject;
-# sigma.prior:  A scalar representing variance of score s_t for t=1,...,N;
-# Phi.prior:    A num.triplets×1 vector representing the triangular parameters;
-# lambda.prior: A num.free×1 vector representing the local-shrinkage parameters;
-# tau.prior:    A scalar representing the global-shrinkage parameters;
-# nu.prior:     A num.free×1 vector representing the scalar of lambda.prior;
-# xi.prior:     A scalar representing the scalar of tau.prior.
+# model:          A character vector specifying which model to run MCMC.
+#                 Defaults: c("IBT.cpp", "IBT.R", "BBT.cpp", "BBT.R", "BBT.Stan");
+# num.chains:     Number of independent MCMC chains to run;
+# num.entities:   Number of entities (e.g., items and players).
+# name:           A string representing the name of parameters;
+# MCMC.plot       Logical flag: if TRUE, print MCMC sample paths for the specified parameters;
+# rhat:           Logical flag: if TRUE, compute and print Rhat values;
+# ess:            Logical flag: if TRUE, compute and print Effective Sample Size (ESS);
+# X:              An N×N matrix where the (i, j) entry indicates that player i defeats player j;
+# mcmc:           Number of iterations;
+# burn:           Burn-in period;
+# thin:           A thinning interval;
+# seed:           Integer: Random seed for reproducibility.
+# s.prior:        A N×1 vector representing the score of each subject;
+# sigma.prior:    A scalar representing variance of score s_t for t=1,...,N;
+# weights.prior:  A num.free×1 vector representing the weights of the basis in H;
+# lambda.prior:   A num.free×1 vector representing the local-shrinkage parameters;
+# tau.prior:      A scalar representing the global-shrinkage parameters;
+# nu.prior:       A num.free×1 vector representing the scalar of lambda.prior;
+# xi.prior:       A scalar representing the scalar of tau.prior.
 
 ## OUTPUT:
 # A list of MCMC draws from multiple chains.
@@ -668,31 +684,31 @@ run.MCMCs <- function(model = c("IBT.cpp", "IBT.R", "ICBT", "BBT.cpp", "BBT.R", 
   if (model == "IBT.cpp") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
-      IBT.Gibbs.cpp(X, mcmc = mcmc, burn = burn, thin = thin, operators = NULL,
-                    s.prior = IBT.params$s.prior, 
-                    sigma.prior = IBT.params$sigma.prior, 
-                    Phi.prior = IBT.params$Phi.prior, 
-                    tau.prior = IBT.params$tau.prior, 
-                    lambda.prior = IBT.params$lambda.prior, 
-                    nu.prior = IBT.params$nu.prior, 
-                    xi.prior = IBT.params$xi.prior)
+      IBT.cpp(X, mcmc = mcmc, burn = burn, thin = thin, operators = NULL,
+              s.prior = IBT.params$s.prior, 
+              sigma.prior = IBT.params$sigma.prior,
+              weights.prior = IBT.params$weights.prior, 
+              tau.prior = IBT.params$tau.prior, 
+              lambda.prior = IBT.params$lambda.prior, 
+              nu.prior = IBT.params$nu.prior, 
+              xi.prior = IBT.params$xi.prior)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
   } else if (model == "IBT.R") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
-      IBT.Gibbs.R(X, mcmc = mcmc, burn = burn, thin = thin, operators = NULL,
-                  s.prior = IBT.params$s.prior, 
-                  sigma.prior = IBT.params$sigma.prior, 
-                  Phi.prior = IBT.params$Phi.prior, 
-                  tau.prior = IBT.params$tau.prior, 
-                  lambda.prior = IBT.params$lambda.prior, 
-                  nu.prior = IBT.params$nu.prior, 
-                  xi.prior = IBT.params$xi.prior)
+      IBT.R(X, mcmc = mcmc, burn = burn, thin = thin, operators = NULL,
+            s.prior = IBT.params$s.prior, 
+            sigma.prior = IBT.params$sigma.prior, 
+            weights.prior = IBT.params$weights.prior, 
+            tau.prior = IBT.params$tau.prior, 
+            lambda.prior = IBT.params$lambda.prior, 
+            nu.prior = IBT.params$nu.prior, 
+            xi.prior = IBT.params$xi.prior)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
   } else if(model == "ICBT") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
-      ICBT.RJMCMC(X, mcmc = mcmc, burn = burn, thin = thin, seed = seed,
+      ICBT.RJMCMC(X, mcmc = mcmc, burn = burn, thin = thin, operators = NULL,
                   alpha = ICBT.params$alpha, 
                   beta = ICBT.params$beta, 
                   gamma = ICBT.params$gamma, 
@@ -701,24 +717,33 @@ run.MCMCs <- function(model = c("IBT.cpp", "IBT.R", "ICBT", "BBT.cpp", "BBT.R", 
                   lambda_A = ICBT.params$lambda_A, 
                   nu_A = ICBT.params$nu_A)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
+  } else if (model == "BBT.Stan") {
+    chains <- BBT.Stan(X, num.chains = num.chains, mcmc = mcmc, burn = burn, thin = thin, seed = seed)
   } else if (model == "BBT.cpp") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
-      BBT.Gibbs.cpp(X, mcmc = mcmc, burn = burn, thin = thin,
-                    s.prior = BBT.params$s.prior, sigma.prior = BBT.params$sigma.prior)
+      BBT.cpp(X, mcmc = mcmc, burn = burn, thin = thin,
+              s.prior = BBT.params$s.prior, sigma.prior = BBT.params$sigma.prior)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
-  }
-  else if (model == "BBT.R") {
+  } else if (model == "BBT.R") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
-      BBT.Gibbs(X, mcmc = mcmc, burn = burn, thin = thin,
-                s.prior = BBT.params$s.prior, sigma.prior = BBT.params$sigma.prior)
+      BBT.R(X, mcmc = mcmc, burn = burn, thin = thin,
+            s.prior = BBT.params$s.prior, sigma.prior = BBT.params$sigma.prior)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
-  } else if (model == "BBT.Stan") {
-    chains <- BBT.Stan(X, num.chains = num.chains, mcmc = mcmc, burn = burn, thin = thin, seed = seed)
   }
   
   ## Extract samples of specific parameter (name) from chains
+  if (!name %in% names(chains[[1]])) {
+    name.old <- name
+    name <- names(chains[[1]])[1]
+    message(sprintf(
+      "Parameter '%s' not found. Available parameters: %s. Continuing with '%s'.",
+      name.old,
+      paste(names(chains[[1]]), collapse = ", "),
+      name
+    ))
+  }
   mcmc.chains <- mcmc.extract(chains, num.entities, name, rhat = rhat, ess = ess)
   
   ## Plot MCMC sample paths
@@ -770,7 +795,7 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, 
       }
     }
     mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "theta" || name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "grad" || name == "curl" || name == "M") {
     mcmc <- nrow(mcmc.chains[[1]])
     pairs <- t(combn(num.entities, 2))
     num.pairs <- nrow(pairs)
@@ -792,7 +817,7 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, 
       }
     }
     mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "weights" || name == "lambda" || name == "nu") {
+  } else if (name == "weights" || name == "lambda" || name == "nu" || name == "theta") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.free <- dim(mcmc.chains[[1]])[2]
     
@@ -895,7 +920,7 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains = NULL,
       }
     }
     mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "theta" || name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "grad" || name == "curl" || name == "M") {
     mcmc <- nrow(mcmc.chains[[1]])
     pairs <- t(combn(num.entities, 2))
     num.pairs <- nrow(pairs)
@@ -919,7 +944,7 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains = NULL,
       }
     }
     mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "weights" || name == "lambda" || name == "nu") {
+  } else if (name == "weights" || name == "lambda" || name == "nu" || name == "theta") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.free <- dim(mcmc.chains[[1]])[2]
     
@@ -1026,7 +1051,7 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, n
       }
     }
     mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "theta" || name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "grad" || name == "curl" || name == "M") {
     mcmc <- nrow(mcmc.chains[[1]])
     pairs <- t(combn(num.entities, 2))
     num.pairs <- nrow(pairs)
@@ -1050,7 +1075,7 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, n
       }
     }
     mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "weights" || name == "lambda" || name == "nu") {
+  } else if (name == "weights" || name == "lambda" || name == "nu" || name == "theta") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.free <- dim(mcmc.chains[[1]])[2]
     
@@ -1190,7 +1215,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
     outputs <- list(mean = if(!is.null(decimal)) round(means, decimal) else means, 
                     median = if(!is.null(decimal)) round(medians, decimal) else medians)
     return(outputs)
-  } else if (name == "theta" || name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "grad" || name == "curl" || name == "M") {
     for (chain in 1:num.chains) {
       if (!silent.flag) cat("Chain", chain, "\n")
       mcmc <- nrow(mcmc.chains[[chain]])
@@ -1242,7 +1267,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
     outputs <- list(mean = if(!is.null(decimal)) round(means, decimal) else means, 
                     median = if(!is.null(decimal)) round(medians, decimal) else medians)
     return(outputs)
-  } else if (name == "weights" || name == "lambda" || name == "nu") {
+  } else if (name == "weights" || name == "lambda" || name == "nu" || name == "theta") {
     for (chain in 1:num.chains) {
       if (!silent.flag) cat("Chain", chain, "\n")
       mcmc <- dim(mcmc.chains[[chain]])[1]
@@ -1414,7 +1439,7 @@ mcmc.extract <- function(chains = NULL, num.entities = NULL, name = NULL,
         }
       }
     }
-  } else if (name == "theta" || name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "grad" || name == "curl" || name == "M") {
     mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
     
     ## Compute Gelman-Rubin diagnostic (Rhat) and Effective Sample Size (ESS)
@@ -1438,7 +1463,7 @@ mcmc.extract <- function(chains = NULL, num.entities = NULL, name = NULL,
         }
       }
     }
-  } else if (name == "weights" || name == "lambda" || name == "nu") {
+  } else if (name == "weights" || name == "lambda" || name == "nu" || name == "theta") {
     mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
     
     ## Compute Gelman-Rubin diagnostic (Rhat)
@@ -1891,7 +1916,7 @@ generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.ent
 ## OUTPUT:
 # A data frame storing metrics (MSE, CP, Accuracy, Recall, Precision) for each model
 
-compute.metrics <- function(model = c("IBT.cpp", "BBT.Stan"), mcmc.chain = NULL, 
+compute.metrics <- function(model = c("IBT.cpp", "ICBT", "BBT.Stan"), mcmc.chain = NULL, 
                             relations.true = NULL, time = NULL, 
                             levels = 0.95, hpd = TRUE)
   {
@@ -2057,7 +2082,8 @@ compute.metrics <- function(model = c("IBT.cpp", "BBT.Stan"), mcmc.chain = NULL,
 
 run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL, 
                            setting = c("transitive", "sparse", "dense"), decimal = 4,
-                           mcmc.params = NULL, data.params = NULL, model.params = NULL)
+                           mcmc.params = NULL, data.params = NULL,
+                           IBT.params = NULL, ICBT.params = NULL)
   {
   ## Preparation
   run.time <- Sys.time()
@@ -2066,14 +2092,6 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   thin   <- mcmc.params$thin
   levels <- mcmc.params$levels
   hpd    <- mcmc.params$hpd
-  
-  s.prior      <- model.params$s.prior
-  sigma.prior  <- model.params$sigma.prior
-  Phi.prior    <- model.params$Phi.prior
-  lambda.prior <- model.params$lambda.prior
-  tau.prior    <- model.params$tau.prior
-  nu.prior     <- model.params$nu.prior
-  xi.prior     <- model.params$xi.prior
   operators <- build.hodge_operators(num.entities = num.entities, tol = 1e-10) # Build operators
   
   ## Generate Datasets
@@ -2103,20 +2121,37 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
     # Evaluate IBT.cpp
     start.time <- Sys.time()
     set.seed(r)
-    results.IBT <- IBT.Gibbs.cpp(X, mcmc = mcmc, burn = burn, thin = thin, operators = operators,
-                                 s.prior = s.prior, sigma.prior = sigma.prior, 
-                                 Phi.prior = Phi.prior, 
-                                 lambda.prior = lambda.prior, tau.prior = tau.prior, 
-                                 nu.prior = nu.prior, xi.prior = xi.prior)
+    results.IBT <- IBT.cpp(X, mcmc = mcmc, burn = burn, thin = thin, operators = operators,
+                           s.prior = IBT.params$s.prior, 
+                           sigma.prior = IBT.params$sigma.prior, 
+                           weights.prior = IBT.params$weights.prior, 
+                           lambda.prior = IBT.params$lambda.prior, 
+                           tau.prior = IBT.params$tau.prior, 
+                           nu.prior = IBT.params$nu.prior, 
+                           xi.prior = IBT.params$xi.prior)
     time.sec <- difftime(Sys.time(), start.time, units = "sec")
     metrics.list$IBT <- compute.metrics(model = "IBT.cpp", results.IBT,
                                         relations.true, as.numeric(time.sec),
                                         level = levels, hpd = TRUE)
     
+    # Evaluate ICBT
+    start.time <- Sys.time()
+    results.ICBT <- ICBT.RJMCMC(X, mcmc = mcmc, burn = burn, thin = thin, operators = operators,
+                                alpha = ICBT.params$alpha, 
+                                beta = ICBT.params$beta,
+                                gamma = ICBT.params$gamma, 
+                                lambda = ICBT.params$gamma,
+                                gamma_A = ICBT.params$gamma_A, 
+                                lambda_A = ICBT.params$lambda_A, 
+                                nu_A = ICBT.params$nu_A)
+    time.sec <- difftime(Sys.time(), start.time, units = "sec")
+    metrics.list$ICBT <- compute.metrics(model = "ICBT", results.ICBT,
+                                         relations.true, as.numeric(time.sec),
+                                         level = levels, hpd = TRUE)
+    
     # Evaluate BBT.Stan
     start.time <- Sys.time()
-    results.BBT <- BBT.Stan(X, num.chains = 1, mcmc = mcmc, burn = burn, thin = thin, 
-                            operators = operators, seed = r)
+    results.BBT <- BBT.Stan(X, num.chains = 1, mcmc = mcmc, burn = burn, thin = thin, operators = operators)
     time.sec <- difftime(Sys.time(), start.time, units = "sec")
     metrics.list$BBT <- compute.metrics(model = "BBT.Stan", results.BBT[[1]],
                                         relations.true, as.numeric(time.sec),

@@ -6,8 +6,8 @@
 ######################  BEGIN Import & Setting  ################################
 
 source("libraries.R")
-#list.files("RJMCMC alg", full.names = TRUE) %>%   # For ICBT model
-#  purrr::walk(source)
+list.files("RJMCMC alg", full.names = TRUE) %>%   # For ICBT model
+  purrr::walk(source)
 sourceCpp("IBT.cpp")  # For CBT model
 source("functions.R")
 source("database.R")
@@ -23,7 +23,7 @@ source("database.R")
 #                               weight = "prop", layout = "circle", tie_mode = "skip")
 
 ## For Artificial Data:
-N <- 10
+N <- 5
 triplets <- t(combn(1:N, 3))
 num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
 num.free <- choose(N-1,2)
@@ -52,18 +52,18 @@ BT.results <- BT.freq(X, sort.flag = TRUE, desc.flag = FALSE, draw.flag = TRUE, 
 num.chains <- 1
 num.iter <- 10000
 num.burn <- num.iter/5
-model <- "IBT.cpp"   # Options: (IBT.R, IBT.cpp, ICBT, BBT.Stan, BBT.Gibbs)
-param.name <- "s" # Options: (s, weights, Phi, lambda, tau, nu, xi, grad, curl, M)
+model <- "ICBT"   # Options: (IBT.R, IBT.cpp, ICBT, BBT.Stan, BBT.cpp, BBT.R)
+param.name <- "sigma" # Options: (s, sigma, weights, Phi, lambda, tau, nu, xi, grad, curl, M)
 
 ## Prior specification
-BBT.priors <- list(s.prior      = rep(0, N), sigma.prior  = 2)
-IBT.priors <- list(s.prior      = rep(0, N),
-                   sigma.prior  = 2,
-                   Phi.prior    = rep(0, num.triplets),
-                   lambda.prior = rep(1, num.free), 
-                   tau.prior    = 1, 
-                   nu.prior     = rep(1, num.free), 
-                   xi.prior     = 1)
+BBT.priors <- list(s.prior       = rep(0, N), sigma.prior = 2.5)
+IBT.priors <- list(s.prior       = rep(0, N),
+                   sigma.prior   = 2.5,
+                   weights.prior = rep(0, num.free),
+                   lambda.prior  = rep(1, num.free), 
+                   tau.prior     = 1, 
+                   nu.prior      = rep(1, num.free), 
+                   xi.prior      = 1)
 ICBT.priors <- list(alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
                     gamma_A = 1, lambda_A = 10, nu_A = 1)
 
@@ -107,7 +107,7 @@ plot.reversed_edges(network.estimates$graphs, networks.true$graphs, networks.tru
 #############################  BEGIN Simulations  ##############################
 
 ## Setting
-num.cores    <- 10    # the number of cores to parallel
+num.cores    <- 8    # the number of cores to parallel
 num.replica  <- 100   # the number of datasets
 num.entities <- 10    # the number of entities
 num.triplets <- choose(num.entities,3)
@@ -116,7 +116,7 @@ num.free <- choose(num.entities-1,2)
 mcmc.params <- list(mcmc   = 10000,
                     burn   = 2000,
                     thin   = 1,
-                    levels = c(0.1, 0.2, 0.4, 0.5, 0.8, 0.9, 0.95),
+                    levels = c(0.8, 0.9, 0.95),
                     hpd    = TRUE)
 data.params <- list(s.sd = 2.5,
                     freq.range = c(100, 100),
