@@ -36,14 +36,13 @@ initial_model_A2 = function(model, df){## clusters the best strength values, giv
   
   #plot(model$postR)
   
-  for(i in 1:(model$postCl_df_A+1)){
-    
-    points(which(model$postAllocation_A == i), model$postR[which(model$postAllocation_A == i)], col = i)
-    abline(h= c(model$postPhi)[i],col=i)
-  }
+  #for(i in 1:(model$postCl_df_A+1)){
+  #  points(which(model$postAllocation_A == i), model$postR[which(model$postAllocation_A == i)], col = i)
+  #  abline(h= c(model$postPhi)[i],col=i)
+  #}
   
   #plot(density(model$postR))
-  abline(v = c(model$postPhi) ,col = 2, lty = 2)
+  #abline(v = c(model$postPhi) ,col = 2, lty = 2)
   
   model$postR = NULL #remove r_vec since are clustering this now.
   #print("-------------- llh after clustering strengths -----------")
@@ -206,20 +205,19 @@ initial_model = function(n, df){
   model = fit[[which.min(sapply(fit, function(a) a$BIC))]]
   #plot(intrans_est)
   
-  for(i in 0:(model$postCl_df)){
-    
-    points(which(model$postAllocation==i | model$postAllocation==-i),
-           intrans_est[which(model$postAllocation==i | model$postAllocation==-i)] ,col=i+1)
-    if(i == 0){
-      abline(h = 0)
-    }else{
-      abline(h=model$postTheta[i],col=i+1)
-      abline(h=-model$postTheta[i],col=i+1)
-    }
-  }
+  #for(i in 0:(model$postCl_df)){
+  #  points(which(model$postAllocation==i | model$postAllocation==-i),
+  #         intrans_est[which(model$postAllocation==i | model$postAllocation==-i)] ,col=i+1)
+  #  if(i == 0){
+  #    abline(h = 0)
+  #  }else{
+  #    abline(h=model$postTheta[i],col=i+1)
+  #    abline(h=-model$postTheta[i],col=i+1)
+  #  }
+  #}
   
   #plot(density(abs(intrans_est)))
-  abline(v = c(0, model$postTheta), lty = 2, col=2)
+  #abline(v = c(0, model$postTheta), lty = 2, col=2)
   #------------------------------------------------------------#
   
   return(model)

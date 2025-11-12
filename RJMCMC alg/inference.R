@@ -8,7 +8,6 @@ model_extrct = function(output){
   
   btmodel = BT_model(output$data)
   
-  
   theta_long = sapply(c(1:((n*(n-1)/2) - (n-1))), function(i) sapply(1:l, function(j) {
     
     k = output$RJMCMC$model3$postAllocation[i,j]

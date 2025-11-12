@@ -195,7 +195,11 @@ main_A = function(df, n,
                                     step_pars = step_pars, priors = priors, alg_pars = alg_pars,
                                     n = n)
   
-  list("RJMCMC" = RJMCMC_samples)
+  return(list("input_model" = input_model, "RJMCMC" = RJMCMC_samples, 
+              "params" = list("step" = step_pars,
+                              "prior" = priors,
+                              "alg_pars"= alg_pars),
+              "data" = df))
 }
 
 
