@@ -469,12 +469,15 @@ BBT.Stan <- function(X, num.chains = 1, mcmc = 10000, burn = 2000, thin = 1,
 # burn:         Burn-in period;
 # thin:         A thinning interval;
 # operators:    A list containing basis matrices (G, C.ast, H, A);
-# others:        Hyperparameters of the ICBT model e.g., alpha,beta,....
+# s.BT:         A N×1 vector estimated by Bradley-Terry model using BradleyTerry2 package;
+# M.BT:         A num.pairs×1 vector estimated by Bradley-Terry model using BradleyTerry2 package;
+# others:       Hyperparameters of the ICBT model e.g., alpha,beta,....
 
 ## OUTPUT:
 # A list of MCMC samples for the parameters: s, sigma, grad, M.
 
 ICBT.RJMCMC <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
+                        s.BT = NULL, M.BT = NULL,
                         alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
                         gamma_A = 1, lambda_A = 10, nu_A = 1)
   {
@@ -536,7 +539,7 @@ ICBT.RJMCMC <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
                          gamma_A = gamma_A, lambda_A = lambda_A, nu_A = nu_A)
   time.sec <- difftime(Sys.time(), start.time, units = "sec")
   samples.pos <- ICBT.results$RJMCMC$model3
-  
+
   ## Reconstruct Skill parameters
   phi.pos     <- samples.pos$postPhi            # (max_A+1) × num.sampling
   alloc_A.pos <- samples.pos$postAllocation_A   # N × num.sampling
@@ -563,8 +566,12 @@ ICBT.RJMCMC <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
   grad.pos <- as.matrix(G %*% s.pos)
   M.pos <- grad.pos + theta.pos
   
-  list(time = as.numeric(time.sec), s = t(s.pos), theta = t(theta.pos), 
-       grad = t(grad.pos), curl = t(theta.pos), M = t(M.pos))
+  ## Reparameterization
+  theta_re.pos <- M.pos - M.BT
+  
+  list(M = t(M.pos), time = as.numeric(time.sec),
+       s = t(s.pos), grad = t(grad.pos), curl = t(theta.pos), 
+       s_re = s.BT, grad_re = as.matrix(G %*% s_re), curl_re = t(theta_re.pos))
 }
 
 
@@ -586,7 +593,6 @@ ICBT.RJMCMC <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
 # Draws the specified network graphs and invisibly returns a list containing the graph objects.
 
 BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE, draw.flag = FALSE, decimal = 3) {
-  start.time <- Sys.time()
   ## Preparation
   entity.name <- unique(c(X$player1, X$player2))
   N <- length(entity.name)  # number of entities
@@ -626,8 +632,6 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE, draw.flag = FALSE, de
   
   output <- list(s = citations.qv$qvframe$estimate, M = M.BT,
                  graphs = network.BT$graphs, layout = network.BT$layout)
-  
-  print(paste("Total runtime: ", round(difftime(Sys.time(), start.time, units = "sec"), 3), "seconds"))
   return(invisible(output))
 }
 
@@ -685,37 +689,40 @@ run.MCMCs <- function(model = c("IBT.cpp", "IBT.R", "ICBT", "BBT.cpp", "BBT.R", 
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
       IBT.cpp(X, mcmc = mcmc, burn = burn, thin = thin, operators = NULL,
-              s.prior = IBT.params$s.prior, 
-              sigma.prior = IBT.params$sigma.prior,
+              s.prior       = IBT.params$s.prior, 
+              sigma.prior   = IBT.params$sigma.prior,
               weights.prior = IBT.params$weights.prior, 
-              tau.prior = IBT.params$tau.prior, 
-              lambda.prior = IBT.params$lambda.prior, 
-              nu.prior = IBT.params$nu.prior, 
-              xi.prior = IBT.params$xi.prior)
+              tau.prior     = IBT.params$tau.prior, 
+              lambda.prior  = IBT.params$lambda.prior, 
+              nu.prior      = IBT.params$nu.prior, 
+              xi.prior      = IBT.params$xi.prior)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
   } else if (model == "IBT.R") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
       IBT.R(X, mcmc = mcmc, burn = burn, thin = thin, operators = NULL,
-            s.prior = IBT.params$s.prior, 
-            sigma.prior = IBT.params$sigma.prior, 
+            s.prior       = IBT.params$s.prior, 
+            sigma.prior   = IBT.params$sigma.prior, 
             weights.prior = IBT.params$weights.prior, 
-            tau.prior = IBT.params$tau.prior, 
-            lambda.prior = IBT.params$lambda.prior, 
-            nu.prior = IBT.params$nu.prior, 
-            xi.prior = IBT.params$xi.prior)
+            tau.prior     = IBT.params$tau.prior, 
+            lambda.prior  = IBT.params$lambda.prior, 
+            nu.prior      = IBT.params$nu.prior, 
+            xi.prior      = IBT.params$xi.prior)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
   } else if(model == "ICBT") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
+      BT.results <- BT.freq(X, sort.flag = FALSE, desc.flag = FALSE, draw.flag = FALSE, decimal = 6)
       ICBT.RJMCMC(X, mcmc = mcmc, burn = burn, thin = thin, operators = NULL,
-                  alpha = ICBT.params$alpha, 
-                  beta = ICBT.params$beta, 
-                  gamma = ICBT.params$gamma, 
-                  lambda = ICBT.params$lambda, 
-                  gamma_A = ICBT.params$gamma_A, 
+                  s.BT     = BT.results$s - mean(BT.results$s),
+                  M.BT     = BT.results$M,
+                  alpha    = ICBT.params$alpha, 
+                  beta     = ICBT.params$beta, 
+                  gamma    = ICBT.params$gamma, 
+                  lambda   = ICBT.params$lambda, 
+                  gamma_A  = ICBT.params$gamma_A, 
                   lambda_A = ICBT.params$lambda_A, 
-                  nu_A = ICBT.params$nu_A)
+                  nu_A     = ICBT.params$nu_A)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
   } else if (model == "BBT.Stan") {
     chains <- BBT.Stan(X, num.chains = num.chains, mcmc = mcmc, burn = burn, thin = thin, seed = seed)
@@ -795,7 +802,7 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, 
       }
     }
     mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "grad" || name == "curl" || name == "curl_re" || name == "M") {
     mcmc <- nrow(mcmc.chains[[1]])
     pairs <- t(combn(num.entities, 2))
     num.pairs <- nrow(pairs)
@@ -817,7 +824,7 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, 
       }
     }
     mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "weights" || name == "lambda" || name == "nu" || name == "theta") {
+  } else if (name == "weights" || name == "lambda" || name == "nu") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.free <- dim(mcmc.chains[[1]])[2]
     
@@ -920,7 +927,7 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains = NULL,
       }
     }
     mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "grad" || name == "curl" || name == "curl_re" || name == "M") {
     mcmc <- nrow(mcmc.chains[[1]])
     pairs <- t(combn(num.entities, 2))
     num.pairs <- nrow(pairs)
@@ -944,7 +951,7 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains = NULL,
       }
     }
     mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "weights" || name == "lambda" || name == "nu" || name == "theta") {
+  } else if (name == "weights" || name == "lambda" || name == "nu") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.free <- dim(mcmc.chains[[1]])[2]
     
@@ -1051,7 +1058,7 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, n
       }
     }
     mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "grad" || name == "curl" || name == "curl_re" || name == "M") {
     mcmc <- nrow(mcmc.chains[[1]])
     pairs <- t(combn(num.entities, 2))
     num.pairs <- nrow(pairs)
@@ -1075,7 +1082,7 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, n
       }
     }
     mtext(paste("ACF Plots for", name), outer = TRUE, cex = 1.5)
-  } else if (name == "weights" || name == "lambda" || name == "nu" || name == "theta") {
+  } else if (name == "weights" || name == "lambda" || name == "nu") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.free <- dim(mcmc.chains[[1]])[2]
     
@@ -1215,7 +1222,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
     outputs <- list(mean = if(!is.null(decimal)) round(means, decimal) else means, 
                     median = if(!is.null(decimal)) round(medians, decimal) else medians)
     return(outputs)
-  } else if (name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "grad" || name == "curl" || name == "curl_re" || name == "M") {
     for (chain in 1:num.chains) {
       if (!silent.flag) cat("Chain", chain, "\n")
       mcmc <- nrow(mcmc.chains[[chain]])
@@ -1267,7 +1274,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
     outputs <- list(mean = if(!is.null(decimal)) round(means, decimal) else means, 
                     median = if(!is.null(decimal)) round(medians, decimal) else medians)
     return(outputs)
-  } else if (name == "weights" || name == "lambda" || name == "nu" || name == "theta") {
+  } else if (name == "weights" || name == "lambda" || name == "nu") {
     for (chain in 1:num.chains) {
       if (!silent.flag) cat("Chain", chain, "\n")
       mcmc <- dim(mcmc.chains[[chain]])[1]
@@ -1439,7 +1446,7 @@ mcmc.extract <- function(chains = NULL, num.entities = NULL, name = NULL,
         }
       }
     }
-  } else if (name == "grad" || name == "curl" || name == "M") {
+  } else if (name == "grad" || name == "curl" || name == "curl_re" || name == "M") {
     mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
     
     ## Compute Gelman-Rubin diagnostic (Rhat) and Effective Sample Size (ESS)
@@ -1463,7 +1470,7 @@ mcmc.extract <- function(chains = NULL, num.entities = NULL, name = NULL,
         }
       }
     }
-  } else if (name == "weights" || name == "lambda" || name == "nu" || name == "theta") {
+  } else if (name == "weights" || name == "lambda" || name == "nu") {
     mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
     
     ## Compute Gelman-Rubin diagnostic (Rhat)
@@ -1916,7 +1923,7 @@ generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.ent
 ## OUTPUT:
 # A data frame storing metrics (MSE, CP, Accuracy, Recall, Precision) for each model
 
-compute.metrics <- function(model = c("IBT.cpp", "ICBT", "BBT.Stan"), mcmc.chain = NULL, 
+compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL, 
                             relations.true = NULL, time = NULL, 
                             levels = 0.95, hpd = TRUE)
   {
@@ -1926,25 +1933,34 @@ compute.metrics <- function(model = c("IBT.cpp", "ICBT", "BBT.Stan"), mcmc.chain
   curl_true <- relations.true[,'curl']
   
   ## Compute MSE and Accuracy
-  ## Posterior Mean
   M_hat.mean    <- apply(mcmc.chain$M, 2, mean)
   MSE_M.mean    <- mean((M_hat.mean - M_true)^2)
   Accuracy.mean <- mean(sign(M_hat.mean * M_true) > 0)
-  grad_hat.mean <- apply(mcmc.chain$grad, 2, mean)
-  MSE_grad.mean <- mean((grad_hat.mean - grad_true)^2)
-  
-  ## Posterior Median
+
   M_hat.median    <- apply(mcmc.chain$M, 2, median)
   MSE_M.median    <- mean((M_hat.median - M_true)^2)
   Accuracy.median <- mean(sign(M_hat.median * M_true) > 0)
-  grad_hat.median <- apply(mcmc.chain$grad, 2, median)
-  MSE_grad.median <- mean((grad_hat.median - grad_true)^2)
+  
+  if (model == "IBT" || model == "BBT") {
+    grad_hat.mean <- apply(mcmc.chain$grad, 2, mean)
+    MSE_grad.mean <- mean((grad_hat.mean - grad_true)^2)
+    grad_hat.median <- apply(mcmc.chain$grad, 2, median)
+    MSE_grad.median <- mean((grad_hat.median - grad_true)^2)
+  } else if (model == "ICBT") {
+    grad_hat <- mcmc.chain$grad_re
+    MSE_grad <- mean((grad_hat - grad_true)^2)
+  }
   
   ## Intrinsic Metrics for the IBT model
-  if (model == "IBT.cpp") {
+  if (model == "IBT") {
     curl_hat.mean   <- apply(mcmc.chain$curl, 2, mean)
     MSE_curl.mean   <- mean((curl_hat.mean - curl_true)^2)
     curl_hat.median <- apply(mcmc.chain$curl, 2, median)
+    MSE_curl.median <- mean((curl_hat.median - curl_true)^2)
+  } else if (model == "ICBT") {
+    curl_hat.mean   <- apply(mcmc.chain$curl_re, 2, mean)
+    MSE_curl.mean   <- mean((curl_hat.mean - curl_true)^2)
+    curl_hat.median <- apply(mcmc.chain$curl_re, 2, median)
     MSE_curl.median <- mean((curl_hat.median - curl_true)^2)
   } else {
     MSE_curl.mean <- MSE_curl.median <- NA
@@ -1954,14 +1970,12 @@ compute.metrics <- function(model = c("IBT.cpp", "ICBT", "BBT.Stan"), mcmc.chain
   if (hpd) {
     mcmc.obj_M    <- coda::as.mcmc(mcmc.chain$M)
     mcmc.obj_grad <- coda::as.mcmc(mcmc.chain$grad)
-    if (model == "IBT.cpp") {
-      mcmc.obj_curl <- coda::as.mcmc(mcmc.chain$curl)
-    }
+    if (model == "IBT") mcmc.obj_curl <- coda::as.mcmc(mcmc.chain$curl)
+    if (model == "ICBT") mcmc.obj_curl <- coda::as.mcmc(mcmc.chain$curl_re)
   }
   
   ## Compute Metrics depending on 'levels' (CP, Recall, Precision)
   results.levels <- list()
-  
   for (level in levels) {
     pr <- c((1-level)/2, 1-(1-level)/2)
     
@@ -2130,13 +2144,16 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
                            nu.prior = IBT.params$nu.prior, 
                            xi.prior = IBT.params$xi.prior)
     time.sec <- difftime(Sys.time(), start.time, units = "sec")
-    metrics.list$IBT <- compute.metrics(model = "IBT.cpp", results.IBT,
+    metrics.list$IBT <- compute.metrics(model = "IBT", results.IBT,
                                         relations.true, as.numeric(time.sec),
                                         level = levels, hpd = TRUE)
     
     # Evaluate ICBT
     start.time <- Sys.time()
+    BT.results <- BT.freq(X, sort.flag = FALSE, desc.flag = FALSE, draw.flag = FALSE, decimal = 6)
     results.ICBT <- ICBT.RJMCMC(X, mcmc = mcmc, burn = burn, thin = thin, operators = operators,
+                                s.BT = BT.results$s - mean(BT.results$s),
+                                M.BT = BT.results$M,
                                 alpha = ICBT.params$alpha, 
                                 beta = ICBT.params$beta,
                                 gamma = ICBT.params$gamma, 
@@ -2153,7 +2170,7 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
     start.time <- Sys.time()
     results.BBT <- BBT.Stan(X, num.chains = 1, mcmc = mcmc, burn = burn, thin = thin, operators = operators)
     time.sec <- difftime(Sys.time(), start.time, units = "sec")
-    metrics.list$BBT <- compute.metrics(model = "BBT.Stan", results.BBT[[1]],
+    metrics.list$BBT <- compute.metrics(model = "BBT", results.BBT[[1]],
                                         relations.true, as.numeric(time.sec),
                                         level = levels, hpd = TRUE)
     
