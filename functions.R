@@ -1969,15 +1969,18 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
     curl_hat.median <- apply(mcmc.chain$curl_re, 2, median)
     MSE_curl.median <- mean((curl_hat.median - curl_true)^2)
   } else {
-    MSE_curl.mean <- MSE_curl.median <- NA
+    MSE_curl.mean <- MSE_curl.median <- NaN
   }
+  
   # ----------------------  END Compute MSE and Accuracy  ----------------------
   
   # -----------------  BEGIN Compute CP, Recall and Precision  -----------------
   results.levels <- list()
   if (hpd) { 
-    mcmc.obj_M    <- coda::as.mcmc(mcmc.chain$M)
-    mcmc.obj_grad <- coda::as.mcmc(mcmc.chain$grad)
+    if (!model == "ICBT") {
+      mcmc.obj_M    <- coda::as.mcmc(mcmc.chain$M)
+      mcmc.obj_grad <- coda::as.mcmc(mcmc.chain$grad)
+    }
     if (model == "IBT") mcmc.obj_curl <- coda::as.mcmc(mcmc.chain$curl)
     if (model == "ICBT") mcmc.obj_curl <- coda::as.mcmc(mcmc.chain$curl_re)
   }
@@ -1987,25 +1990,29 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
     pr <- c((1-level)/2, 1-(1-level)/2)
     
     # Check each Metric (M, grad, curl) is in its Credible Intervals
-    if (hpd) {
-      hpd.int_M   <- coda::HPDinterval(mcmc.obj_M, prob = level)
-      M_hat.lower <- hpd.int_M[, "lower"]
-      M_hat.upper <- hpd.int_M[, "upper"]
-      
-      hpd.int_grad   <- coda::HPDinterval(mcmc.obj_grad, prob = level)
-      grad_hat.lower <- hpd.int_grad[, "lower"]
-      grad_hat.upper <- hpd.int_grad[, "upper"]
+    if (model == "IBT" || model == "BBT") {
+      if (hpd) {
+        hpd.int_M   <- coda::HPDinterval(mcmc.obj_M, prob = level)
+        M_hat.lower <- hpd.int_M[, "lower"]
+        M_hat.upper <- hpd.int_M[, "upper"]
+        
+        hpd.int_grad <- coda::HPDinterval(mcmc.obj_grad, prob = level)
+        grad_hat.lower <- hpd.int_grad[, "lower"]
+        grad_hat.upper <- hpd.int_grad[, "upper"]
+      } else {
+        CI_M        <- apply(mcmc.chain$M, 2, quantile, probs = pr)
+        M_hat.lower <- CI_M[1, ]
+        M_hat.upper <- CI_M[2, ]
+        
+        CI_grad <- apply(mcmc.chain$grad, 2, quantile, probs = pr)
+        grad_hat.lower <- CI_grad[1, ]
+        grad_hat.upper <- CI_grad[2, ]
+      }
+      CP_M.flag    <- (M_true >= M_hat.lower) & (M_true <= M_hat.upper)
+      CP_grad.flag <- (grad_true >= grad_hat.lower) & (grad_true <= grad_hat.upper)
     } else {
-      CI_M        <- apply(mcmc.chain$M, 2, quantile, probs = pr)
-      M_hat.lower <- CI_M[1, ]
-      M_hat.upper <- CI_M[2, ]
-      
-      CI_grad        <- apply(mcmc.chain$grad, 2, quantile, probs = pr)
-      grad_hat.lower <- CI_grad[1, ]
-      grad_hat.upper <- CI_grad[2, ]
+      CP_M.flag <- CP_grad.flag <- rep(NA, num.pairs)
     }
-    CP_M.flag    <- (M_true >= M_hat.lower) & (M_true <= M_hat.upper)
-    CP_grad.flag <- (grad_true >= grad_hat.lower) & (grad_true <= grad_hat.upper)
     
     if (model == "IBT" || model == "ICBT") {
       if (hpd) {
@@ -2033,8 +2040,8 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
       Recall    <- ifelse(num.nonzero_true == 0, 0, num.nonzero_detected / num.nonzero_true)
       Precision <- ifelse(num.nonzero_hat == 0, 0, num.nonzero_detected / num.nonzero_hat)
     } else {
-      CP_curl.flag <- rep(NA, length(curl_true))
-      Recall <- Precision <- NA
+      CP_curl.flag <- rep(NA, num.pairs)
+      Recall <- Precision <- NaN
     }
     
     # Helper Function to store Coverage flag
@@ -2188,9 +2195,6 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
     do.call(rbind, metrics.list)
   }, mc.cores = num.cores)
   
-  ## Summary
-  cat("Step 3: Aggregating results...\n\n")
-  
   ## Check results and Filter NULL/NA
   sound.results <- Filter(is.data.frame, results.list)
   num.failed <- length(results.list) - length(sound.results)
@@ -2199,6 +2203,9 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   }
   results.df <- do.call(rbind, sound.results)
   results.df$Level <- as.numeric(as.character(results.df$Level))
+  
+  ## Summary
+  cat("Step 3: Aggregating results...\n\n")
   base.cols <- c("Model", "Estimator")
   type1.cols <- c("MSE_M", "MSE_grad", "MSE_curl", "Accuracy", "Time")
   type2.cols <- c("Level", "Recall", "Precision")
@@ -2238,7 +2245,7 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   if (length(CP_grad.cols) > 0) CP_Grad <- rowMeans(type3.summary[, CP_grad.cols], na.rm = TRUE)
   if (length(CP_curl.cols) > 0) {
     CP_Curl <- rowMeans(type3.summary[, CP_curl.cols], na.rm = TRUE)
-    CP_Curl[is.nan(type3.summary$CP_Curl)] <- NA
+    CP_Curl[is.nan(type3.summary$CP_Curl)] <- NaN
   }
   type3.summary <- data.frame(Model     = type3.summary$Model,
                               Estimator = type3.summary$Estimator,
