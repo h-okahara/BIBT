@@ -571,7 +571,7 @@ ICBT.RJMCMC <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
   
   list(M = t(M.pos), time = as.numeric(time.sec),
        s = t(s.pos), grad = t(grad.pos), curl = t(theta.pos), 
-       s_re = s.BT, grad_re = as.matrix(G %*% s.BT), curl_re = t(theta_re.pos))
+       s_re = s.BT, grad_re = as.vector(G %*% s.BT), curl_re = t(theta_re.pos))
 }
 
 
@@ -1940,20 +1940,21 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
   # ---------------------  BEGIN Compute MSE and Accuracy  ---------------------
   M_hat.mean    <- apply(mcmc.chain$M, 2, mean)
   MSE_M.mean    <- mean((M_hat.mean - M_true)^2)
-  Accuracy.mean <- mean(sign(M_hat.mean * M_true) > 0)
-
   M_hat.median    <- apply(mcmc.chain$M, 2, median)
   MSE_M.median    <- mean((M_hat.median - M_true)^2)
-  Accuracy.median <- mean(sign(M_hat.median * M_true) > 0)
   
   if (model == "IBT" || model == "BBT") {
     grad_hat.mean <- apply(mcmc.chain$grad, 2, mean)
     MSE_grad.mean <- mean((grad_hat.mean - grad_true)^2)
+    Accuracy.mean <- mean(sign(M_hat.mean * M_true) > 0)
+
     grad_hat.median <- apply(mcmc.chain$grad, 2, median)
     MSE_grad.median <- mean((grad_hat.median - grad_true)^2)
+    Accuracy.median <- mean(sign(M_hat.median * M_true) > 0)
   } else if (model == "ICBT") {
     grad_hat <- mcmc.chain$grad_re
     MSE_grad <- mean((grad_hat - grad_true)^2)
+    
     MSE_grad.mean <- MSE_grad.median <- MSE_grad
   }
   
@@ -2011,7 +2012,7 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
       CP_M.flag    <- (M_true >= M_hat.lower) & (M_true <= M_hat.upper)
       CP_grad.flag <- (grad_true >= grad_hat.lower) & (grad_true <= grad_hat.upper)
     } else {
-      CP_M.flag <- CP_grad.flag <- rep(NA, num.pairs)
+      CP_M.flag <- CP_grad.flag <- rep(NA, length(M_true))
     }
     
     if (model == "IBT" || model == "ICBT") {
@@ -2040,7 +2041,7 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
       Recall    <- ifelse(num.nonzero_true == 0, 0, num.nonzero_detected / num.nonzero_true)
       Precision <- ifelse(num.nonzero_hat == 0, 0, num.nonzero_detected / num.nonzero_hat)
     } else {
-      CP_curl.flag <- rep(NA, num.pairs)
+      CP_curl.flag <- rep(NA, length(curl_true))
       Recall <- Precision <- NaN
     }
     
@@ -2164,7 +2165,7 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
     time.sec <- difftime(Sys.time(), start.time, units = "sec")
     metrics.list$IBT <- compute.metrics(model = "IBT", results.IBT,
                                         relations.true, as.numeric(time.sec),
-                                        level = levels, hpd = TRUE)
+                                        levels = levels, hpd = TRUE)
     
     # Evaluate ICBT
     start.time <- Sys.time()
@@ -2182,7 +2183,7 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
     time.sec <- difftime(Sys.time(), start.time, units = "sec")
     metrics.list$ICBT <- compute.metrics(model = "ICBT", results.ICBT,
                                          relations.true, as.numeric(time.sec),
-                                         level = levels, hpd = TRUE)
+                                         levels = levels, hpd = TRUE)
     
     # Evaluate BBT.Stan
     start.time <- Sys.time()
@@ -2190,7 +2191,7 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
     time.sec <- difftime(Sys.time(), start.time, units = "sec")
     metrics.list$BBT <- compute.metrics(model = "BBT", results.BBT[[1]],
                                         relations.true, as.numeric(time.sec),
-                                        level = levels, hpd = TRUE)
+                                        levels = levels, hpd = TRUE)
     
     do.call(rbind, metrics.list)
   }, mc.cores = num.cores)
@@ -2259,7 +2260,6 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   end.time <- difftime(Sys.time(), run.time, units = "sec")
   cat("Simulation finished in", end.time, "seconds.\n")
   
-  ## Return
   mean.list   <- list(Metrics1 = type1.summary[type1.summary[,"Estimator"] == "Mean",], 
                       Metrics2 = type2.summary[type2.summary[,"Estimator"] == "Mean",], 
                       CP       = type3.summary[type3.summary[,"Estimator"] == "Mean",])
