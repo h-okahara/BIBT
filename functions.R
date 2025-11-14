@@ -1938,19 +1938,20 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
   curl_true <- relations.true[,'curl']
   
   # ---------------------  BEGIN Compute MSE and Accuracy  ---------------------
-  M_hat.mean    <- apply(mcmc.chain$M, 2, mean)
-  MSE_M.mean    <- mean((M_hat.mean - M_true)^2)
+  M_hat.mean      <- apply(mcmc.chain$M, 2, mean)
+  MSE_M.mean      <- mean((M_hat.mean - M_true)^2)
+  Accuracy.mean   <- mean(sign(M_hat.mean * M_true) > 0)
+  
   M_hat.median    <- apply(mcmc.chain$M, 2, median)
   MSE_M.median    <- mean((M_hat.median - M_true)^2)
+  Accuracy.median <- mean(sign(M_hat.median * M_true) > 0)
   
   if (model == "IBT" || model == "BBT") {
     grad_hat.mean <- apply(mcmc.chain$grad, 2, mean)
     MSE_grad.mean <- mean((grad_hat.mean - grad_true)^2)
-    Accuracy.mean <- mean(sign(M_hat.mean * M_true) > 0)
-
+    
     grad_hat.median <- apply(mcmc.chain$grad, 2, median)
     MSE_grad.median <- mean((grad_hat.median - grad_true)^2)
-    Accuracy.median <- mean(sign(M_hat.median * M_true) > 0)
   } else if (model == "ICBT") {
     grad_hat <- mcmc.chain$grad_re
     MSE_grad <- mean((grad_hat - grad_true)^2)
@@ -1978,10 +1979,8 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
   # -----------------  BEGIN Compute CP, Recall and Precision  -----------------
   results.levels <- list()
   if (hpd) { 
-    if (!model == "ICBT") {
-      mcmc.obj_M    <- coda::as.mcmc(mcmc.chain$M)
-      mcmc.obj_grad <- coda::as.mcmc(mcmc.chain$grad)
-    }
+    mcmc.obj_M    <- coda::as.mcmc(mcmc.chain$M)
+    if (!model == "ICBT") mcmc.obj_grad <- coda::as.mcmc(mcmc.chain$grad)
     if (model == "IBT") mcmc.obj_curl <- coda::as.mcmc(mcmc.chain$curl)
     if (model == "ICBT") mcmc.obj_curl <- coda::as.mcmc(mcmc.chain$curl_re)
   }
@@ -1991,28 +1990,30 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
     pr <- c((1-level)/2, 1-(1-level)/2)
     
     # Check each Metric (M, grad, curl) is in its Credible Intervals
+    if (hpd) {
+      hpd.int_M   <- coda::HPDinterval(mcmc.obj_M, prob = level)
+      M_hat.lower <- hpd.int_M[, "lower"]
+      M_hat.upper <- hpd.int_M[, "upper"]
+    } else {
+      CI_M        <- apply(mcmc.chain$M, 2, quantile, probs = pr)
+      M_hat.lower <- CI_M[1, ]
+      M_hat.upper <- CI_M[2, ]
+    }
+    CP_M.flag    <- (M_true >= M_hat.lower) & (M_true <= M_hat.upper)
+    
     if (model == "IBT" || model == "BBT") {
       if (hpd) {
-        hpd.int_M   <- coda::HPDinterval(mcmc.obj_M, prob = level)
-        M_hat.lower <- hpd.int_M[, "lower"]
-        M_hat.upper <- hpd.int_M[, "upper"]
-        
         hpd.int_grad <- coda::HPDinterval(mcmc.obj_grad, prob = level)
         grad_hat.lower <- hpd.int_grad[, "lower"]
         grad_hat.upper <- hpd.int_grad[, "upper"]
       } else {
-        CI_M        <- apply(mcmc.chain$M, 2, quantile, probs = pr)
-        M_hat.lower <- CI_M[1, ]
-        M_hat.upper <- CI_M[2, ]
-        
         CI_grad <- apply(mcmc.chain$grad, 2, quantile, probs = pr)
         grad_hat.lower <- CI_grad[1, ]
         grad_hat.upper <- CI_grad[2, ]
       }
-      CP_M.flag    <- (M_true >= M_hat.lower) & (M_true <= M_hat.upper)
       CP_grad.flag <- (grad_true >= grad_hat.lower) & (grad_true <= grad_hat.upper)
     } else {
-      CP_M.flag <- CP_grad.flag <- rep(NA, length(M_true))
+      CP_grad.flag <- rep(NA, length(M_true))
     }
     
     if (model == "IBT" || model == "ICBT") {
@@ -2021,11 +2022,8 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
         curl_hat.lower <- hpd.int_curl[, "lower"]
         curl_hat.upper <- hpd.int_curl[, "upper"]
       } else {
-        if (model == "IBT") {
-          CI_curl <- apply(mcmc.chain$curl, 2, quantile, probs = pr)
-        } else if (model == "ICBT") {
-          CI_curl <- apply(mcmc.chain$curl_re, 2, quantile, probs = pr)
-        }
+        if (model == "IBT")  CI_curl <- apply(mcmc.chain$curl, 2, quantile, probs = pr)
+        if (model == "ICBT") CI_curl <- apply(mcmc.chain$curl_re, 2, quantile, probs = pr)
         curl_hat.lower <- CI_curl[1, ]
         curl_hat.upper <- CI_curl[2, ]
       }
@@ -2052,37 +2050,33 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
       }
     
     # Store results to data frame
-    df.mean <- data.frame(
-      Model        = model,
-      Estimator    = "Mean",
-      Level        = level,
-      MSE_M        = MSE_M.mean,
-      MSE_grad     = MSE_grad.mean,
-      MSE_curl     = MSE_curl.mean,
-      Accuracy     = Accuracy.mean,
-      Recall       = Recall,
-      Precision    = Precision,
-      Time         = time,
-      CP_M         = make.CP_cols(CP_M.flag),
-      CP_grad      = make.CP_cols(CP_grad.flag),
-      CP_curl      = make.CP_cols(CP_curl.flag)
-    )
+    df.mean <- data.frame(Model     = model,
+                          Estimator = "Mean",
+                          Level     = level,
+                          MSE_M     = MSE_M.mean,
+                          MSE_grad  = MSE_grad.mean,
+                          MSE_curl  = MSE_curl.mean,
+                          Accuracy  = Accuracy.mean,
+                          Recall    = Recall,
+                          Precision = Precision,
+                          Time      = time,
+                          CP_M      = make.CP_cols(CP_M.flag),
+                          CP_grad   = make.CP_cols(CP_grad.flag),
+                          CP_curl   = make.CP_cols(CP_curl.flag))
     
-    df.median <- data.frame(
-      Model        = model,
-      Estimator    = "Median",
-      Level        = level,
-      MSE_M        = MSE_M.median,
-      MSE_grad     = MSE_grad.median,
-      MSE_curl     = MSE_curl.median,
-      Accuracy     = Accuracy.median,
-      Recall       = Recall,
-      Precision    = Precision,
-      Time         = time,
-      CP_M         = make.CP_cols(CP_M.flag),
-      CP_grad      = make.CP_cols(CP_grad.flag),
-      CP_curl      = make.CP_cols(CP_curl.flag)
-    )
+    df.median <- data.frame(Model     = model,
+                            Estimator = "Median",
+                            Level     = level,
+                            MSE_M     = MSE_M.median,
+                            MSE_grad  = MSE_grad.median,
+                            MSE_curl  = MSE_curl.median,
+                            Accuracy  = Accuracy.median,
+                            Recall    = Recall,
+                            Precision = Precision,
+                            Time      = time,
+                            CP_M      = make.CP_cols(CP_M.flag),
+                            CP_grad   = make.CP_cols(CP_grad.flag),
+                            CP_curl   = make.CP_cols(CP_curl.flag))
     
     results.levels[[as.character(level)]] <- rbind(df.mean, df.median)
   }
@@ -2120,14 +2114,15 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   {
   ## Preparation
   run.time <- Sys.time()
-  mcmc   <- mcmc.params$mcmc
-  burn   <- mcmc.params$burn
-  thin   <- mcmc.params$thin
-  levels <- mcmc.params$levels
-  hpd    <- mcmc.params$hpd
+  num.pairs <- choose(num.entities,2)
+  mcmc      <- mcmc.params$mcmc
+  burn      <- mcmc.params$burn
+  thin      <- mcmc.params$thin
+  levels    <- mcmc.params$levels
+  hpd       <- mcmc.params$hpd
   operators <- build.hodge_operators(num.entities = num.entities, tol = 1e-10) # Build operators
   
-  ## Generate Datasets
+  ## -------------------  BEGIN Step 1: Generating datasets  -------------------
   cat(paste("Step 1: Generating", num.replica, "datasets for 'model':", setting, "...\n"))
   datasets <- generate.simulation.datasets(num.cores = num.cores, 
                                            num.replica = num.replica,
@@ -2141,8 +2136,9 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   relations.ratio <- Reduce("+", lapply(datasets, \(x) x$ratios)) / num.replica
   relations.ratio <- round(colMeans(relations.ratio), 3)
   cat(paste("Ratios of 'grad' vs 'curl' = ", relations.ratio[1], ":", relations.ratio[2], "\n"))
+  ## --------------------  END Step 1: Generating datasets  --------------------
   
-  ## Fit 'model' for each datasets
+  ## ----------------------  BEGIN Step 2: Running models  ---------------------
   cat(paste("Step 2: Running models on", num.replica, "datasets...\n"))
   results.list <- parallel::mclapply(1:num.replica, function(r) {
     # Preparation
@@ -2168,22 +2164,55 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
                                         levels = levels, hpd = TRUE)
     
     # Evaluate ICBT
-    start.time <- Sys.time()
-    BT.results <- BT.freq(X, sort.flag = FALSE, desc.flag = FALSE, draw.flag = FALSE, decimal = 6)
-    results.ICBT <- ICBT.RJMCMC(X, mcmc = mcmc, burn = burn, thin = thin, operators = operators,
-                                s.BT = BT.results$s - mean(BT.results$s),
-                                M.BT = BT.results$M,
-                                alpha = ICBT.params$alpha, 
-                                beta = ICBT.params$beta,
-                                gamma = ICBT.params$gamma, 
-                                lambda = ICBT.params$gamma,
-                                gamma_A = ICBT.params$gamma_A, 
-                                lambda_A = ICBT.params$lambda_A, 
-                                nu_A = ICBT.params$nu_A)
-    time.sec <- difftime(Sys.time(), start.time, units = "sec")
-    metrics.list$ICBT <- compute.metrics(model = "ICBT", results.ICBT,
-                                         relations.true, as.numeric(time.sec),
-                                         levels = levels, hpd = TRUE)
+    tryCatch({
+      start.time <- Sys.time()
+      BT.results <- BT.freq(X, sort.flag = FALSE, desc.flag = FALSE, draw.flag = FALSE, decimal = 6)
+      results.ICBT <- ICBT.RJMCMC(X, mcmc = mcmc, burn = burn, thin = thin, operators = operators,
+                                  s.BT = BT.results$s - mean(BT.results$s),
+                                  M.BT = BT.results$M,
+                                  alpha = ICBT.params$alpha, 
+                                  beta = ICBT.params$beta,
+                                  gamma = ICBT.params$gamma, 
+                                  lambda = ICBT.params$gamma,
+                                  gamma_A = ICBT.params$gamma_A, 
+                                  lambda_A = ICBT.params$lambda_A, 
+                                  nu_A = ICBT.params$nu_A)
+      
+      # Check NA,NaN in (M, curl_re) and Remove from results
+      M_na.flag    <- apply(results.ICBT$M, 1, function(row) any(is.na(row) | is.nan(row)))
+      curl_na.flag <- apply(results.ICBT$curl_re, 1, function(row) any(is.na(row) | is.nan(row)))
+      rows_na.idx  <- which(M_na.flag | curl_na.flag)
+      
+      if (length(rows_na.idx) > 0) {
+        warning(paste("Replica", r, ": Removing", length(rows_na.idx), "unstable iterations (NA/NaN) from ICBT results."))
+        
+        rows_valid.idx <- setdiff(1:((mcmc-burn)/thin), rows_na.idx)
+        results.ICBT$M <- results.ICBT$M[rows_valid.idx, , drop = FALSE]
+        results.ICBT$curl_re <- results.ICBT$curl_re[rows_valid.idx, , drop = FALSE]
+      }
+      
+      time.sec <- difftime(Sys.time(), start.time, units = "sec")
+      metrics.list$ICBT <- compute.metrics(model = "ICBT", results.ICBT,
+                                           relations.true, as.numeric(time.sec),
+                                           levels = levels, hpd = TRUE)
+    }, error = function(e) {
+      warning(paste("ICBT failed for replica", r, ":", e$message))
+      
+      # Create Null list
+      name.cols <- c("Model", "Estimator", "Level", "MSE_M", "MSE_grad", "MSE_curl", 
+                     "Accuracy", "Recall", "Precision", "Time",
+                     paste0("CP_M.X", 1:num.pairs), paste0("CP_grad.X", 1:num.pairs), paste0("CP_curl.X", 1:num.pairs))
+      num.rows <- 2 * length(levels)
+      num.cols <- length(name.cols)
+      ICBT_na.df <- as.data.frame(matrix(NA, nrow = num.rows, ncol = num.cols))
+      colnames(ICBT_na.df) <- name.cols
+      
+      ICBT_na.df$Model <- "ICBT"
+      ICBT_na.df$Estimator <- rep(c("Mean", "Median"), length(levels))
+      ICBT_na.df$Level <- rep(levels, each = 2)
+      ICBT_na.df[, setdiff(name.cols, c("Model", "Estimator", "Level"))] <- NaN
+      metrics.list$ICBT <- ICBT_na.df
+    })
     
     # Evaluate BBT.Stan
     start.time <- Sys.time()
@@ -2195,6 +2224,14 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
     
     do.call(rbind, metrics.list)
   }, mc.cores = num.cores)
+  ## -----------------------  END Step 2: Running models  ----------------------
+  
+  ## -------------------  BEGIN Step 3: Aggregating results  -------------------
+  cat("Step 3: Aggregating results...\n\n")
+  base.cols <- c("Model", "Estimator")
+  type1.cols <- c("MSE_M", "MSE_grad", "MSE_curl", "Accuracy", "Time")
+  type2.cols <- c("Level", "Recall", "Precision")
+  type3.cols <- setdiff(names(results.df), c(base.cols, type1.cols, type2.cols))
   
   ## Check results and Filter NULL/NA
   sound.results <- Filter(is.data.frame, results.list)
@@ -2205,18 +2242,11 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   results.df <- do.call(rbind, sound.results)
   results.df$Level <- as.numeric(as.character(results.df$Level))
   
-  ## Summary
-  cat("Step 3: Aggregating results...\n\n")
-  base.cols <- c("Model", "Estimator")
-  type1.cols <- c("MSE_M", "MSE_grad", "MSE_curl", "Accuracy", "Time")
-  type2.cols <- c("Level", "Recall", "Precision")
-  type3.cols <- setdiff(names(results.df), c(base.cols, type1.cols, type2.cols))
-  
   ## For Numerical Metrics (MSE, Accuracy, Time)
   type1.summary <- aggregate(as.data.frame(results.df[type1.cols]),
                              by = results.df[c(base.cols, "Level")],
                              FUN = mean, 
-                             na.action = na.pass)
+                             na.action = na.rm)
   type1.summary[type1.cols] <- round(type1.summary[type1.cols], decimal)
   type1.summary <- type1.summary[order(type1.summary$Model), ]
   row.names(type1.summary) <- NULL
@@ -2225,8 +2255,8 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   ## For Numerical Metrics (Recall, Precision)
   type2.summary <- aggregate(as.data.frame(results.df[setdiff(type2.cols, "Level")]),
                              by = results.df[c(base.cols, "Level")],
-                             FUN = mean, 
-                             na.action = na.pass)
+                             FUN = mean,
+                             na.action = na.rm)
   type2.summary[type2.cols] <- round(type2.summary[type2.cols], decimal)
   type2.summary <- type2.summary[order(type2.summary$Model), ]
   row.names(type2.summary) <- NULL
@@ -2235,7 +2265,7 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   type3.summary <- aggregate(as.data.frame(results.df[type3.cols]),
                              by = results.df[c(base.cols, "Level")],
                              FUN = mean,
-                             na.action = na.pass)
+                             na.action = na.rm)
   
   ## Compute each Coverage Probability (CP)
   CP_M.cols     <- names(type3.summary)[startsWith(names(type3.summary), "CP_M")]    # CP_M
@@ -2256,10 +2286,10 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
                               CP_Curl   = round(CP_Curl, decimal))
   type3.summary <- type3.summary[order(type3.summary$Model, type3.summary$Level), ]
   row.names(type3.summary) <- NULL
+  ## --------------------  END Step 3: Aggregating results  --------------------
   
   end.time <- difftime(Sys.time(), run.time, units = "sec")
   cat("Simulation finished in", end.time, "seconds.\n")
-  
   mean.list   <- list(Metrics1 = type1.summary[type1.summary[,"Estimator"] == "Mean",], 
                       Metrics2 = type2.summary[type2.summary[,"Estimator"] == "Mean",], 
                       CP       = type3.summary[type3.summary[,"Estimator"] == "Mean",])

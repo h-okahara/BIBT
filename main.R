@@ -108,8 +108,8 @@ plot.reversed_edges(network.estimates$graphs, networks.true$graphs, networks.tru
 #############################  BEGIN Simulations  ##############################
 
 ## Setting
-num.cores    <- 8    # the number of cores to parallel
-num.replica  <- 8   # the number of datasets
+num.cores    <- 24    # the number of cores to parallel
+num.replica  <- 100   # the number of datasets
 num.entities <- 5    # the number of entities
 num.triplets <- choose(num.entities,3)
 num.free <- choose(num.entities-1,2)
@@ -122,26 +122,26 @@ mcmc.params <- list(mcmc   = 10000,
 data.params <- list(s.sd = 2.5,
                     freq.range = c(100, 100),
                     w.params = list(norm = 6, sparsity = 0.8, sd = 1.5))
-IBT.priors <- list(s.prior       = rep(0, num.entities),
+IBT.params <- list(s.prior       = rep(0, num.entities),
                    sigma.prior   = 2.5,
                    weights.prior = rep(0, num.free),
-                   lambda.prior  = rep(1, num.free), 
+                   lambda.prior  = rep(1, num.free),
                    tau.prior     = 1,
                    nu.prior      = rep(1, num.free),
                    xi.prior      = 1)
-ICBT.priors <- list(alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
+ICBT.params <- list(alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
                     gamma_A = 1, lambda_A = 10, nu_A = 1)
 
 setting = "transitive"    # Options: (transitive, sparse, dense)
-trans.results <- run.simulation(num.cores    = num.cores, 
+trans.results <- run.simulation(num.cores    = num.cores,
                                num.replica  = num.replica, 
                                num.entities = num.entities, 
                                setting      = setting,
                                decimal      = 3,
                                mcmc.params  = mcmc.params,
                                data.params  = data.params,
-                               IBT.params   = IBT.priors,
-                               ICBT.params  = ICBT.priors)
+                               IBT.params   = IBT.params,
+                               ICBT.params  = ICBT.params)
 
 setting = "sparse"    # Options: (transitive, sparse, dense)
 sparse.results <- run.simulation(num.cores    = num.cores, 
@@ -165,5 +165,5 @@ dense.results <- run.simulation(num.cores    = num.cores,
                                 data.params  = data.params, 
                                 IBT.params   = IBT.priors,
                                 ICBT.params  = ICBT.priors)
-
+dense.results$Mean
 ##############################  END Simulations  ###############################
