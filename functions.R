@@ -2325,11 +2325,11 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
 # Returns an invisible TRUE if all write operations succeed.
 # This function appends the input data frames to 'results/metrics1.csv', 'results/metrics2.csv', and 'results/CP.csv'.
 
-store.csv <- function(results = NULL) {
+store.csv <- function(results = NULL, num.entities = NULL) {
   ## Preparation
-  filepath.metrics1 <- file.path(getwd(), "results/metrics1.csv")
-  filepath.metrics2 <- file.path(getwd(), "results/metrics2.csv")
-  filepath.CP       <- file.path(getwd(), "results/CP.csv")
+  filepath.metrics1 <- file.path(getwd(), paste0("results/metrics1_", num.entities, ".csv"))
+  filepath.metrics2 <- file.path(getwd(), paste0("results/metrics2_",num.entities, ".csv"))
+  filepath.CP       <- file.path(getwd(), paste0("results/CP_",num.entities, ".csv"))
   file1.flag <- file.exists(filepath.metrics1)
   file2.flag <- file.exists(filepath.metrics2)
   file3.flag <- file.exists(filepath.CP)
@@ -2386,6 +2386,7 @@ store.csv <- function(results = NULL) {
   
   return(invisible(all.success))
 }
+
 
 ##############################  END Simulations  ###############################
 
