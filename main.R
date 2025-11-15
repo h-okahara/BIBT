@@ -23,7 +23,7 @@ source("database.R")
 #                               weight = "prop", layout = "circle", tie_mode = "skip")
 
 ## For Artificial Data:
-num.entities <- 4
+num.entities <- 5
 triplets <- t(combn(1:num.entities, 3))
 num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
 num.free <- choose(num.entities-1,2)
@@ -108,8 +108,8 @@ plot.reversed_edges(network.estimates$graphs, networks.true$graphs, networks.tru
 #############################  BEGIN Simulations  ##############################
 
 ## Setting
-num.cores    <- 24    # the number of cores to parallel
-num.replica  <- 100   # the number of datasets
+num.cores    <- 8    # the number of cores to parallel
+num.replica  <- 16   # the number of datasets
 num.entities <- 5    # the number of entities
 num.triplets <- choose(num.entities,3)
 num.free <- choose(num.entities-1,2)
@@ -132,38 +132,28 @@ IBT.params <- list(s.prior       = rep(0, num.entities),
 ICBT.params <- list(alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
                     gamma_A = 1, lambda_A = 10, nu_A = 1)
 
-setting = "transitive"    # Options: (transitive, sparse, dense)
-trans.results <- run.simulation(num.cores    = num.cores,
-                               num.replica  = num.replica, 
-                               num.entities = num.entities, 
-                               setting      = setting,
-                               decimal      = 3,
-                               mcmc.params  = mcmc.params,
-                               data.params  = data.params,
-                               IBT.params   = IBT.params,
-                               ICBT.params  = ICBT.params)
+success.flag <- list()
+for (sparsity in seq(0, 1, by = 0.1)) {
+  if (sparsity == 1) {
+    setting = "transitive"
+  } else if (sparsity == 0) {
+    setting = "dense"
+  } else {
+   setting = "sparse"
+   data.params$w.params$sparsity <- sparsity
+  }
+  
+  results <- run.simulation(num.cores    = num.cores, 
+                            num.replica  = num.replica, 
+                            num.entities = num.entities, 
+                            setting      = setting,
+                            decimal      = 3,
+                            mcmc.params  = mcmc.params, 
+                            data.params  = data.params, 
+                            IBT.params   = IBT.params,
+                            ICBT.params  = ICBT.params)
+  success.flag <- store.csv(results$ALL)
+}
 
-setting = "sparse"    # Options: (transitive, sparse, dense)
-sparse.results <- run.simulation(num.cores    = num.cores, 
-                                 num.replica  = num.replica, 
-                                 num.entities = num.entities, 
-                                 setting      = setting,
-                                 decimal      = 3,
-                                 mcmc.params  = mcmc.params, 
-                                 data.params  = data.params, 
-                                 IBT.params   = IBT.priors,
-                                 ICBT.params  = ICBT.priors)
 
-
-setting = "dense"    # Options: (transitive, sparse, dense)
-dense.results <- run.simulation(num.cores    = num.cores, 
-                                num.replica  = num.replica, 
-                                num.entities = num.entities, 
-                                setting      = setting,
-                                decimal      = 3,
-                                mcmc.params  = mcmc.params, 
-                                data.params  = data.params, 
-                                IBT.params   = IBT.priors,
-                                ICBT.params  = ICBT.priors)
-dense.results$Mean
 ##############################  END Simulations  ###############################

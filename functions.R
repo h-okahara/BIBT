@@ -2227,12 +2227,6 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   ## -----------------------  END Step 2: Running models  ----------------------
   
   ## -------------------  BEGIN Step 3: Aggregating results  -------------------
-  cat("Step 3: Aggregating results...\n\n")
-  base.cols <- c("Model", "Estimator")
-  type1.cols <- c("MSE_M", "MSE_grad", "MSE_curl", "Accuracy", "Time")
-  type2.cols <- c("Level", "Recall", "Precision")
-  type3.cols <- setdiff(names(results.df), c(base.cols, type1.cols, type2.cols))
-  
   ## Check results and Filter NULL/NA
   sound.results <- Filter(is.data.frame, results.list)
   num.failed <- length(results.list) - length(sound.results)
@@ -2241,6 +2235,12 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   }
   results.df <- do.call(rbind, sound.results)
   results.df$Level <- as.numeric(as.character(results.df$Level))
+  
+  cat("Step 3: Aggregating results...\n\n")
+  base.cols <- c("Model", "Estimator")
+  type1.cols <- c("MSE_M", "MSE_grad", "MSE_curl", "Accuracy", "Time")
+  type2.cols <- c("Level", "Recall", "Precision")
+  type3.cols <- setdiff(names(results.df), c(base.cols, type1.cols, type2.cols))
   
   ## For Numerical Metrics (MSE, Accuracy, Time)
   type1.summary <- aggregate(as.data.frame(results.df[type1.cols]),
@@ -2286,10 +2286,20 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
                               CP_Curl   = round(CP_Curl, decimal))
   type3.summary <- type3.summary[order(type3.summary$Model, type3.summary$Level), ]
   row.names(type3.summary) <- NULL
+  
+  if (setting == "transitive") {
+    type1.summary$sparsity <- type2.summary$sparsity <- type3.summary$sparsity <- 0
+  } else if (setting == "sparse") {
+    type1.summary$sparsity <- type2.summary$sparsity <- type3.summary$sparsity <- data.params$w.params$sparsity
+  } else if (setting == "dense") {
+    type1.summary$sparsity <- type2.summary$sparsity <- type3.summary$sparsity <- 1
+  }
+  
   ## --------------------  END Step 3: Aggregating results  --------------------
   
   end.time <- difftime(Sys.time(), run.time, units = "sec")
   cat("Simulation finished in", end.time, "seconds.\n")
+  all.list    <- list(Metrics1 = type1.summary, Metrics2 = type2.summary, CP = type3.summary)
   mean.list   <- list(Metrics1 = type1.summary[type1.summary[,"Estimator"] == "Mean",], 
                       Metrics2 = type2.summary[type2.summary[,"Estimator"] == "Mean",], 
                       CP       = type3.summary[type3.summary[,"Estimator"] == "Mean",])
@@ -2297,7 +2307,84 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
                       Metrics2 = type2.summary[type2.summary[,"Estimator"] == "Median",], 
                       CP       = type3.summary[type3.summary[,"Estimator"] == "Median",])
   
-  list(Mean = mean.list, Median = median.list)
+  list(All = all.list, Mean = mean.list, Median = median.list)
+}
+
+
+
+
+###---------------------------------###
+###    Store Metrics to CSV file    ###
+###---------------------------------###
+
+## INPUT:
+# results:  A data frame from run.simulation() (e.g., results$All) containing
+#           three data frames: $Metrics1, $Metrics2, and $CP;
+
+## OUTPUT:
+# Returns an invisible TRUE if all write operations succeed.
+# This function appends the input data frames to 'results/metrics1.csv', 'results/metrics2.csv', and 'results/CP.csv'.
+
+store.csv <- function(results = NULL) {
+  ## Preparation
+  filepath.metrics1 <- file.path(getwd(), "results/metrics1.csv")
+  filepath.metrics2 <- file.path(getwd(), "results/metrics2.csv")
+  filepath.CP       <- file.path(getwd(), "results/CP.csv")
+  file1.flag <- file.exists(filepath.metrics1)
+  file2.flag <- file.exists(filepath.metrics2)
+  file3.flag <- file.exists(filepath.CP)
+  dir.create(dirname(filepath.metrics1), showWarnings = FALSE, recursive = TRUE)
+  dir.create(dirname(filepath.metrics2), showWarnings = FALSE, recursive = TRUE)
+  dir.create(dirname(filepath.CP), showWarnings = FALSE, recursive = TRUE)
+  
+  all.success <- TRUE # Track overall success
+  
+  ## Store Metrics1
+  tryCatch({
+    write.table(
+      x = results$Metrics1,
+      file = filepath.metrics1,
+      append = file1.flag,     
+      sep = ",",
+      row.names = FALSE,
+      col.names = !file1.flag  
+    )
+  }, error = function(e) {
+    warning(paste("Failed to write to CSV file '", filepath.metrics1, "':", e$message, sep = ""))
+    all.success <<- FALSE
+  })
+  
+  ## Store Metrics2
+  tryCatch({
+    write.table(
+      x = results$Metrics2,
+      file = filepath.metrics2,
+      append = file2.flag,
+      sep = ",",
+      row.names = FALSE,
+      col.names = !file2.flag
+    )
+  }, error = function(e) {
+    warning(paste("Failed to write to CSV file '", filepath.metrics2, "':", e$message, sep = ""))
+    all.success <<- FALSE
+  })
+  
+  ## Store CP
+  tryCatch({
+    write.table(
+      x = results$CP,
+      file = filepath.CP,
+      append = file3.flag,
+      sep = ",",
+      row.names = FALSE,
+      col.names = !file3.flag
+    )
+  }, error = function(e) {
+    warning(paste("Failed to write to CSV file '", filepath.CP, "':", e$message, sep = ""))
+    all.success <<- FALSE
+  })
+  
+  return(invisible(all.success))
 }
 
 ##############################  END Simulations  ###############################
@@ -2633,6 +2720,60 @@ plot.reversed_edges <- function(graphs.estimated = NULL, graphs.true = NULL, lay
     }
   }
   return(invisible(edges.diff))
+}
+
+
+
+
+### -------------------------------------------###
+###    Plot Bar Graph of Recall / Precision    ###
+### -------------------------------------------###
+
+## INPUT: 
+# results:  A data frame from run.simulation(), e.g., output$Mean$Metrics2:
+
+## OUTPUT:
+# A ggplot object.
+
+plot.Metrics2 <- function(results = NULL) {
+  ## Preparation
+  estimator <- unique(results$Estimator)
+  data.metrics2 <- results %>%
+    filter(Model %in% c("IBT", "ICBT")) %>%
+    tidyr::pivot_longer(
+      cols = c("Precision", "Recall"),
+      names_to = "Metric",
+      values_to = "Value"
+    )
+  
+  ## Draw Recall / Precision
+  ggplot(data.metrics2,
+         aes(x = Level,
+             y = Value,
+             color = Model,
+             linetype = Metric,
+             group = interaction(Model, Metric))
+         ) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 3, alpha = 0.9) +
+    scale_linetype_manual(values = c("Precision" = "solid", "Recall" = "dashed")) + 
+    scale_y_continuous(limits = c(0, 1)) +
+    scale_x_continuous(breaks = unique(data.metrics2$Level)) +
+    
+    # Set the label and title
+    labs(
+      title = estimator,
+      x = "Level",
+      y = "Metric Value",
+      color = "Model",
+      linetype = "Metric"
+    ) +
+    theme_minimal(base_size = 16) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      legend.position = "bottom",
+      legend.key.width = unit(1.5, "cm")
+      )
 }
 
 ######################  END Functions for Visualization  #######################
