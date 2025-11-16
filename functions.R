@@ -1848,7 +1848,7 @@ generate.artificial.data <- function(num.entities = NULL, operators = NULL,
 #               the number of comparisons for each pair;
 # w.params:     A list of parameters for generating 'weights' depending on the 'setting':
 #               - "sparse": Requires list(norm = ..., sparsity = ...);
-#               - "dense":  Requires list(sd = ...);
+#               - "dense":  Requires list(norm = ...);
 # operators:    A list containing basis matrices (G, C.ast, H, A).
 
 ## OUTPUT:
@@ -1865,7 +1865,7 @@ generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.ent
   }
   num.pairs <- choose(num.entities, 2)
   num.free <- choose(num.entities-1, 2)
-  if(setting == "sparse" && is.null(operators)) operators <- build.hodge_operators(num.entities)
+  if(is.null(operators)) operators <- build.hodge_operators(num.entities)
   
   ## Generate simulation datasets
   datasets <- parallel::mclapply(1:num.replica, function(r) {
@@ -1894,8 +1894,11 @@ generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.ent
                            operators = operators)$weights
       },
       "dense" = {  # Simulation 3
-        if (is.null(w.params$sd)) stop("w.params for 'dense' must contain 'sd'.")
-        rnorm(num.free, mean = 0, sd = w.params$sd)
+        if (is.null(w.params$norm)) stop("w.params for 'dense' must contain 'norm'.")
+        weights <- rnorm(num.free, mean = 0, sd = 1)
+        const <- sqrt(sum(Phi^2))
+        if (const > 0) weights <- weights * (w.params$norm / const) # Normalization  
+        weights
       }
     )
     
@@ -1963,11 +1966,13 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
   if (model == "IBT") {
     curl_hat.mean   <- apply(mcmc.chain$curl, 2, mean)
     MSE_curl.mean   <- mean((curl_hat.mean - curl_true)^2)
+    
     curl_hat.median <- apply(mcmc.chain$curl, 2, median)
     MSE_curl.median <- mean((curl_hat.median - curl_true)^2)
   } else if (model == "ICBT") {
     curl_hat.mean   <- apply(mcmc.chain$curl_re, 2, mean)
     MSE_curl.mean   <- mean((curl_hat.mean - curl_true)^2)
+    
     curl_hat.median <- apply(mcmc.chain$curl_re, 2, median)
     MSE_curl.median <- mean((curl_hat.median - curl_true)^2)
   } else {
@@ -2089,6 +2094,7 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
 
 
 
+
 ###----------------------------###
 ###    Run Simulation Study    ###
 ###----------------------------###
@@ -2173,18 +2179,17 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
                                   alpha = ICBT.params$alpha, 
                                   beta = ICBT.params$beta,
                                   gamma = ICBT.params$gamma, 
-                                  lambda = ICBT.params$gamma,
+                                  lambda = ICBT.params$lambda,
                                   gamma_A = ICBT.params$gamma_A, 
                                   lambda_A = ICBT.params$lambda_A, 
                                   nu_A = ICBT.params$nu_A)
       
       # Check NA,NaN in (M, curl_re) and Remove from results
-      M_na.flag    <- apply(results.ICBT$M, 1, function(row) any(is.na(row) | is.nan(row)))
-      curl_na.flag <- apply(results.ICBT$curl_re, 1, function(row) any(is.na(row) | is.nan(row)))
-      rows_na.idx  <- which(M_na.flag | curl_na.flag)
+      rows_invalid.flag <- apply(cbind(results.ICBT$M, results.ICBT$curl_re), 1, function(row) any(!is.finite(row)))
+      rows_na.idx <- which(rows_invalid.flag)
       
       if (length(rows_na.idx) > 0) {
-        warning(paste("Replica", r, ": Removing", length(rows_na.idx), "unstable iterations (NA/NaN) from ICBT results."))
+        warning(paste("Replica", r, ": Removing", length(rows_na.idx), "unstable iterations (NA/NaN/Inf) from ICBT results."))
         
         rows_valid.idx <- setdiff(1:((mcmc-burn)/thin), rows_na.idx)
         results.ICBT$M <- results.ICBT$M[rows_valid.idx, , drop = FALSE]

@@ -108,8 +108,8 @@ plot.reversed_edges(network.estimates$graphs, networks.true$graphs, networks.tru
 #############################  BEGIN Simulations  ##############################
 
 ## Setting
-num.cores    <- 8    # the number of cores to parallel
-num.replica  <- 16   # the number of datasets
+num.cores    <- 10    # the number of cores to parallel
+num.replica  <- 100   # the number of datasets
 num.entities <- 5    # the number of entities
 num.triplets <- choose(num.entities,3)
 num.free <- choose(num.entities-1,2)
@@ -119,9 +119,9 @@ mcmc.params <- list(mcmc   = 10000,
                     thin   = 1,
                     levels = c(seq(0.1, 0.9, by = 0.1) , 0.95),
                     hpd    = TRUE)
-data.params <- list(s.sd = 2.5,
+data.params <- list(s.sd = 1,
                     freq.range = c(100, 100),
-                    w.params = list(norm = 6, sparsity = 0.8, sd = 1.5))
+                    w.params = list(norm = 2, sparsity = 0.2))
 IBT.params <- list(s.prior       = rep(0, num.entities),
                    sigma.prior   = 2.5,
                    weights.prior = rep(0, num.free),
@@ -133,27 +133,26 @@ ICBT.params <- list(alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
                     gamma_A = 1, lambda_A = 10, nu_A = 1)
 
 success.flag <- list()
-for (sparsity in seq(0, 1, by = 0.1)) {
-  if (sparsity == 1) {
+for (i in 0:10) {
+  if (i == 10) {
     setting = "transitive"
-  } else if (sparsity == 0) {
+  } else if (i == 0) {
     setting = "dense"
   } else {
    setting = "sparse"
-   data.params$w.params$sparsity <- sparsity
+   data.params$w.params$sparsity <- i/10
   }
   
-  results <- run.simulation(num.cores    = num.cores, 
-                            num.replica  = num.replica, 
-                            num.entities = num.entities, 
+  results <- run.simulation(num.cores    = num.cores,
+                            num.replica  = num.replica,
+                            num.entities = num.entities,
                             setting      = setting,
                             decimal      = 3,
-                            mcmc.params  = mcmc.params, 
-                            data.params  = data.params, 
+                            mcmc.params  = mcmc.params,
+                            data.params  = data.params,
                             IBT.params   = IBT.params,
                             ICBT.params  = ICBT.params)
-  success.flag <- store.csv(results$ALL)
+  success.flag[i] <- store.csv(results$All, num.entities = num.entities)
 }
-
 
 ##############################  END Simulations  ###############################
