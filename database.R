@@ -6,6 +6,43 @@
 #
 #########################  BEGIN import database  ##############################
 
+## Rock-Paper-Scissors
+database <- list()
+database$name.rps <- c("Rock", "Paper", "Scissors")
+database$freq.rps <- n <- 100
+
+rps.matrix <- matrix(c(
+  0, 0, n, # Rock
+  n, 0, 0, # Paper
+  0, n, 0  # Scissors
+), nrow = 3, byrow = TRUE)
+
+rownames(rps.matrix) <- colnames(rps.matrix) <- database$name.rps
+database$rps <- countsToBinomial(rps.matrix)
+database$rps$n_ij <- database$rps$win1 + database$rps$win2
+database$rps$y_ij <- database$rps$win1
+
+
+## Rock-Paper-Scissors-Lizard-Spock
+database <- list()
+database$name.rpsls <- c("Rock", "Paper", "Scissors", "Lizard", "Spock")
+database$freq.rpsls <- n <- 100
+
+rpsls.matrix <- matrix(c(
+  0,  0,  n,  n,  0,  # Rock     (beats S, L)
+  n,  0,  0,  0,  n,  # Paper    (beats R, Sp)
+  0,  n,  0,  n,  0,  # Scissors (beats P, L)
+  0,  n,  0,  0,  n,  # Lizard   (beats P, Sp)
+  n,  0,  n,  0,  0   # Spock    (beats R, S)
+), nrow = 5, byrow = TRUE)
+
+rownames(rpsls.matrix) <- colnames(rpsls.matrix) <- database$name.rpsls
+database$rpsls <- countsToBinomial(rpsls.matrix)
+database$rpsls$n_ij <- database$rpsls$win1 + database$rpsls$win2
+database$rpsls$y_ij <- database$rpsls$win1
+
+
+
 ###------------------------###
 ###    Import Real Data    ###
 ###------------------------###

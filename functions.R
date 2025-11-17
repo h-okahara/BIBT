@@ -1896,7 +1896,7 @@ generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.ent
       "dense" = {  # Simulation 3
         if (is.null(w.params$norm)) stop("w.params for 'dense' must contain 'norm'.")
         weights <- rnorm(num.free, mean = 0, sd = 1)
-        const <- sqrt(sum(Phi^2))
+        const <- sqrt(sum(weights^2))
         if (const > 0) weights <- weights * (w.params$norm / const) # Normalization  
         weights
       }
@@ -2293,11 +2293,11 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   row.names(type3.summary) <- NULL
   
   if (setting == "transitive") {
-    type1.summary$sparsity <- type2.summary$sparsity <- type3.summary$sparsity <- 0
+    type1.summary$sparsity <- type2.summary$sparsity <- type3.summary$sparsity <- 1
   } else if (setting == "sparse") {
     type1.summary$sparsity <- type2.summary$sparsity <- type3.summary$sparsity <- data.params$w.params$sparsity
   } else if (setting == "dense") {
-    type1.summary$sparsity <- type2.summary$sparsity <- type3.summary$sparsity <- 1
+    type1.summary$sparsity <- type2.summary$sparsity <- type3.summary$sparsity <- 0
   }
   
   ## --------------------  END Step 3: Aggregating results  --------------------

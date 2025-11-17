@@ -108,8 +108,8 @@ plot.reversed_edges(network.estimates$graphs, networks.true$graphs, networks.tru
 #############################  BEGIN Simulations  ##############################
 
 ## Setting
-num.cores    <- 10    # the number of cores to parallel
-num.replica  <- 100   # the number of datasets
+num.cores    <- 8    # the number of cores to parallel
+num.replica  <- 8   # the number of datasets
 num.entities <- 5    # the number of entities
 num.triplets <- choose(num.entities,3)
 num.free <- choose(num.entities-1,2)
@@ -121,7 +121,7 @@ mcmc.params <- list(mcmc   = 10000,
                     hpd    = TRUE)
 data.params <- list(s.sd = 1,
                     freq.range = c(100, 100),
-                    w.params = list(norm = 2, sparsity = 0.2))
+                    w.params = list(norm = 6, sparsity = 0.2))
 IBT.params <- list(s.prior       = rep(0, num.entities),
                    sigma.prior   = 2.5,
                    weights.prior = rep(0, num.free),
@@ -152,6 +152,7 @@ for (i in 0:10) {
                             data.params  = data.params,
                             IBT.params   = IBT.params,
                             ICBT.params  = ICBT.params)
+  results$Mean$Metrics1
   success.flag[i] <- store.csv(results$All, num.entities = num.entities)
 }
 
