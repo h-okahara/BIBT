@@ -1655,14 +1655,23 @@ compute.spPhi.true <- function(num.entities = NULL, norm = NULL, seed = 1,
   if(is.null(operators)) operators <- build.hodge_operators(num.entities)
   H <- operators$H
   
+  ## For transitive setting (sparsity.level = 1)
+  if (sparsity.level == 1) list(weights = rep(0, num.free), Phi = rep(0, num.triplets), iter = 0, sparsity = 1.0)
+  
   ## Generate random vector from col(H)
   w  <- rnorm(num.free)
   Phi <- as.vector(H %*% w)
   const <- sqrt(sum(Phi^2))
-  if (const > 0) Phi <- Phi * (norm / const) # Normalization  
+  if (const > 0) {
+    Phi <- Phi * (norm / const) # Normalization
+    w   <- w * (norm / const)
+  } 
 
-  ## Optimization procedure
-  for (iter in 1:maxit) {
+  ## For dense setting (sparsity.level = 0)
+  if (sparsity.level == 0) list(weights = w, Phi = Phi, iter = 0, sparsity = mean(abs(Phi) < 1e-4))
+  
+  ## For sparse setting (0 < sparsity.level < 1)
+  for (iter in 1:maxit) { # Optimization procedure
     Phi.old <- Phi
     threshold <- quantile(abs(Phi), probs = sparsity.level, type = 1)
     Phi.tmp <- Phi * (abs(Phi) > threshold)
@@ -1671,7 +1680,10 @@ compute.spPhi.true <- function(num.entities = NULL, norm = NULL, seed = 1,
     w <- crossprod(H, Phi.tmp)
     Phi <- as.vector(H %*% w)
     const <- sqrt(sum(Phi^2))
-    if (const > 0) Phi <- Phi * (norm / const) # Normalization
+    if (const > 0) {
+      Phi <- Phi * (norm / const) # Normalization
+      w   <- w * (norm / const)
+    } 
     
     # Check convergence
     epsilon <- sqrt(sum((Phi - Phi.old)^2)) / sqrt(sum(Phi.old^2))
@@ -1885,20 +1897,20 @@ generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.ent
     weights <- switch(
       setting,
       "transitive" = {  # Simulation 1
-        rep(0, num.free)
+        compute.spPhi.true(num.entities = num.entities, norm = NULL,
+                           seed = r, sparsity.level = 1, operators = operators)$weights
       },
       "sparse" = {  # Simulation 2
         if (is.null(w.params$norm) || is.null(w.params$sparsity)) stop("w.params for 'sparse' must contain 'norm' and 'sparsity'.")
+        if (w.params$sparsity <= 0 || w.params$sparsity >= 1) stop ("w.params$sparsity must be in (0,1).")
         compute.spPhi.true(num.entities = num.entities, norm = w.params$norm, 
                            seed = r, sparsity.level = w.params$sparsity, 
                            operators = operators)$weights
       },
       "dense" = {  # Simulation 3
         if (is.null(w.params$norm)) stop("w.params for 'dense' must contain 'norm'.")
-        weights <- rnorm(num.free, mean = 0, sd = 1)
-        const <- sqrt(sum(weights^2))
-        if (const > 0) weights <- weights * (w.params$norm / const) # Normalization  
-        weights
+        compute.spPhi.true(num.entities = num.entities, norm = w.params$norm, 
+                           seed = r, sparsity.level = 0, operators = operators)$weights
       }
     )
     
@@ -2241,7 +2253,7 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   results.df <- do.call(rbind, sound.results)
   results.df$Level <- as.numeric(as.character(results.df$Level))
   
-  cat("Step 3: Aggregating results...\n\n")
+  cat("Step 3: Aggregating results...\n")
   base.cols <- c("Model", "Estimator")
   type1.cols <- c("MSE_M", "MSE_grad", "MSE_curl", "Accuracy", "Time")
   type2.cols <- c("Level", "Recall", "Precision")
@@ -2303,7 +2315,7 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   ## --------------------  END Step 3: Aggregating results  --------------------
   
   end.time <- difftime(Sys.time(), run.time, units = "sec")
-  cat("Simulation finished in", end.time, "seconds.\n")
+  cat("Simulation finished in", end.time, "seconds.\n\n")
   all.list    <- list(Metrics1 = type1.summary, Metrics2 = type2.summary, CP = type3.summary)
   mean.list   <- list(Metrics1 = type1.summary[type1.summary[,"Estimator"] == "Mean",], 
                       Metrics2 = type2.summary[type2.summary[,"Estimator"] == "Mean",], 

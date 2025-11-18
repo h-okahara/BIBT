@@ -121,7 +121,7 @@ mcmc.params <- list(mcmc   = 10000,
                     hpd    = TRUE)
 data.params <- list(s.sd = 1,
                     freq.range = c(100, 100),
-                    w.params = list(norm = 6, sparsity = 0.2))
+                    w.params = list(norm = 2, sparsity = 0.2))
 IBT.params <- list(s.prior       = rep(0, num.entities),
                    sigma.prior   = 2.5,
                    weights.prior = rep(0, num.free),
@@ -142,7 +142,6 @@ for (i in 0:10) {
    setting = "sparse"
    data.params$w.params$sparsity <- i/10
   }
-  
   results <- run.simulation(num.cores    = num.cores,
                             num.replica  = num.replica,
                             num.entities = num.entities,
@@ -152,7 +151,6 @@ for (i in 0:10) {
                             data.params  = data.params,
                             IBT.params   = IBT.params,
                             ICBT.params  = ICBT.params)
-  results$Mean$Metrics1
   success.flag[i] <- store.csv(results$All, num.entities = num.entities)
 }
 
