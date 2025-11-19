@@ -1656,7 +1656,9 @@ compute.spPhi.true <- function(num.entities = NULL, norm = NULL, seed = 1,
   H <- operators$H
   
   ## For transitive setting (sparsity.level = 1)
-  if (sparsity.level == 1) list(weights = rep(0, num.free), Phi = rep(0, num.triplets), iter = 0, sparsity = 1.0)
+  if (sparsity.level == 1) {
+    return(list(weights = rep(0, num.free), Phi = rep(0, num.triplets), iter = 0, sparsity = 1.0))
+  }
   
   ## Generate random vector from col(H)
   w  <- rnorm(num.free)
@@ -1668,7 +1670,9 @@ compute.spPhi.true <- function(num.entities = NULL, norm = NULL, seed = 1,
   } 
 
   ## For dense setting (sparsity.level = 0)
-  if (sparsity.level == 0) list(weights = w, Phi = Phi, iter = 0, sparsity = mean(abs(Phi) < 1e-4))
+  if (sparsity.level == 0) {
+    return(list(weights = w, Phi = Phi, iter = 0, sparsity = mean(abs(Phi) < 1e-4)))
+  }
   
   ## For sparse setting (0 < sparsity.level < 1)
   for (iter in 1:maxit) { # Optimization procedure
@@ -1690,7 +1694,7 @@ compute.spPhi.true <- function(num.entities = NULL, norm = NULL, seed = 1,
     if (epsilon < tol) break
   }
   
-  list(weights = w, Phi = Phi, iter = iter, sparsity = mean(abs(Phi) < 1e-4))
+  return(list(weights = w, Phi = Phi, iter = iter, sparsity = mean(abs(Phi) < 1e-4)))
 }
 
 
@@ -1913,7 +1917,7 @@ generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.ent
                            seed = r, sparsity.level = 0, operators = operators)$weights
       }
     )
-    
+
     ## Generate a true dataset
     generate.artificial.data(num.entities = num.entities, 
                              operators = operators,
@@ -2743,9 +2747,78 @@ plot.reversed_edges <- function(graphs.estimated = NULL, graphs.true = NULL, lay
 
 
 
-### -------------------------------------------###
-###    Plot Bar Graph of Recall / Precision    ###
-### -------------------------------------------###
+### ----------------------------------------###
+###    Plot Line Graph of MSE / Accuracy    ###
+### ----------------------------------------###
+
+## INPUT: 
+# results:  A data frame combines 'output$Mean$Metrics1' from run.simulation();
+# Types:    A character vector specifying the metric columns to plot.
+#           Default: c("MSE_M", "MSE_grad", "MSE_curl", "Accuracy").
+
+## OUTPUT:
+# A combined ggplot (patchwork) object.
+
+plot.Metrics1 <- function(results = NULL, Types = c("MSE_M", "MSE_grad", "MSE_curl", "Accuracy")) {
+  ## Preparation
+  estimator <- unique(results$Estimator)
+  plot.list <- list()
+  
+  ## Store each graph object into plot.list
+  for (type in Types) {
+    plot_data <- results
+
+    # この部分は後で消す
+    use_log_scale <- FALSE
+    if (type %in% c("MSE_grad", "MSE_curl") && any(plot_data[[type]] > 1e10, na.rm = TRUE)) use_log_scale <- TRUE
+    
+    # Create ggplot object
+    p <- ggplot(plot_data, 
+                aes(x = sparsity,
+                    y = .data[[type]],
+                    color = Model,
+                    group = Model)) +
+      geom_line(linewidth = 1) +
+      geom_point(size = 3, alpha = 0.9) +
+      scale_x_continuous(breaks = seq(0, 1, 0.1)) +
+      
+      # Set the label and title
+      labs(
+        title = paste(type, "(", estimator, ")"),
+        x = "Sparsity",
+        y = if (use_log_scale) paste(type, "(log10 scale)") else type
+      ) +
+      theme_bw() +
+      theme(
+        plot.title = element_text(hjust = 0.5, face = "bold"),
+        legend.position = "bottom",
+        legend.key.width = unit(1, "cm")
+      )
+    
+    # Scale y-axis
+    if (use_log_scale) p <- p + scale_y_log10()
+    plot.list[[type]] <- p
+  }
+  
+  ## Combine graphs
+  if (length(plot.list) == 4) {
+    plots.combined <- (plot.list[[1]] + plot.list[[2]]) / 
+      (plot.list[[3]] + plot.list[[4]])
+    
+    # Collect guides (legends) into one
+    plots.combined <- plots.combined + plot_layout(guides = "collect") & theme(legend.position = 'bottom')
+    print(plots.combined)
+  } else {
+    lapply(plot.list, print)
+  }
+}
+
+
+
+
+### --------------------------------------------###
+###    Plot Line Graph of Recall / Precision    ###
+### --------------------------------------------###
 
 ## INPUT: 
 # results:  A data frame from run.simulation(), e.g., output$Mean$Metrics2:
@@ -2786,7 +2859,7 @@ plot.Metrics2 <- function(results = NULL) {
       color = "Model",
       linetype = "Metric"
     ) +
-    theme_minimal(base_size = 16) +
+    theme_bw() +
     theme(
       plot.title = element_text(hjust = 0.5, face = "bold"),
       legend.position = "bottom",

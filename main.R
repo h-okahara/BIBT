@@ -108,8 +108,8 @@ plot.reversed_edges(network.estimates$graphs, networks.true$graphs, networks.tru
 #############################  BEGIN Simulations  ##############################
 
 ## Setting
-num.cores    <- 8    # the number of cores to parallel
-num.replica  <- 8   # the number of datasets
+num.cores    <- 10    # the number of cores to parallel
+num.replica  <- 100   # the number of datasets
 num.entities <- 5    # the number of entities
 num.triplets <- choose(num.entities,3)
 num.free <- choose(num.entities-1,2)
@@ -134,13 +134,14 @@ ICBT.params <- list(alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
 
 success.flag <- list()
 for (i in 0:10) {
-  if (i == 10) {
-    setting = "transitive"
+  if (i != 0 || i != 1) {
+    setting = "sparse"
+    data.params$w.params$sparsity <- i/10
   } else if (i == 0) {
     setting = "dense"
-  } else {
-   setting = "sparse"
-   data.params$w.params$sparsity <- i/10
+  } else if (i == 10) {
+    setting = "transitive"
+    data.params$w.params$sparsity <- 1
   }
   results <- run.simulation(num.cores    = num.cores,
                             num.replica  = num.replica,
@@ -153,5 +154,13 @@ for (i in 0:10) {
                             ICBT.params  = ICBT.params)
   success.flag[i] <- store.csv(results$All, num.entities = num.entities)
 }
+
+df <- read.csv(file.path(getwd(), paste0("results/metrics1_", num.entities, ".csv")))
+tmp <- df[df$Estimator == "Mean", ]
+plot.Metrics1(tmp)
+
+df <- read.csv(file.path(getwd(), paste0("results/metrics2_", num.entities, ".csv")))
+tmp <- df[df$Estimator == "Mean" & df$sparsity == 1, ]
+plot.Metrics2(tmp)
 
 ##############################  END Simulations  ###############################
