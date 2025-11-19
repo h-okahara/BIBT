@@ -1646,7 +1646,7 @@ compute.Phi.true <- function(num.entities = NULL, operators = NULL, weights = NU
 # A sparse Phi vector that satisfies the model constraints.
 
 compute.spPhi.true <- function(num.entities = NULL, norm = NULL, seed = 1,
-                               sparsity.level = 0.9, maxit = 500, tol = 1e-10,
+                               sparsity.level = 0.9, maxit = 1000, tol = 1e-10,
                                operators = NULL) {
   ## Preparation
   set.seed(seed)
@@ -1885,8 +1885,6 @@ generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.ent
   
   ## Generate simulation datasets
   datasets <- parallel::mclapply(1:num.replica, function(r) {
-    set.seed(r)
-    
     ## Uniformly samples s_interval, freq.pair
     s.vec <- sort(rnorm(num.entities, mean = 0, s.sd))
     freq.min <- freq.range[1]
@@ -2124,7 +2122,8 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
 # mcmc.params:  A list of parameters for MCMC: list(mcmc, burn, thin);
 # data.params:  A list of parameters for generating datasets: list(s.sd, freq.range, w.params);
 # model.params: A list of priors for 'model':
-#               list(s.prior, sigma.prior, Phi.prior, lambda.prior, tau.prior, nu.prior, xi.prior).
+#               list(s.prior, sigma.prior, Phi.prior, lambda.prior, tau.prior, nu.prior, xi.prior);
+# seed:         Integer: Random seed for reproducibility.
 
 ## OUTPUT:
 # A data frame storing the average of the replication results for 'num.replica' iterations
@@ -2132,7 +2131,7 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
 run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL, 
                            setting = c("transitive", "sparse", "dense"), decimal = 4,
                            mcmc.params = NULL, data.params = NULL,
-                           IBT.params = NULL, ICBT.params = NULL)
+                           IBT.params = NULL, ICBT.params = NULL, seed = 73)
   {
   ## Preparation
   run.time <- Sys.time()
@@ -2146,6 +2145,8 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   
   ## -------------------  BEGIN Step 1: Generating datasets  -------------------
   cat(paste("Step 1: Generating", num.replica, "datasets for 'model':", setting, "...\n"))
+  RNGkind("L'Ecuyer-CMRG") 
+  set.seed(seed)
   datasets <- generate.simulation.datasets(num.cores = num.cores, 
                                            num.replica = num.replica,
                                            num.entities = num.entities,
@@ -2171,7 +2172,6 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
     
     # Evaluate IBT.cpp
     start.time <- Sys.time()
-    set.seed(r)
     results.IBT <- IBT.cpp(X, mcmc = mcmc, burn = burn, thin = thin, operators = operators,
                            s.prior = IBT.params$s.prior,
                            sigma.prior = IBT.params$sigma.prior, 
@@ -2237,7 +2237,8 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
     
     # Evaluate BBT.Stan
     start.time <- Sys.time()
-    results.BBT <- BBT.Stan(X, num.chains = 1, mcmc = mcmc, burn = burn, thin = thin, operators = operators)
+    results.BBT <- BBT.Stan(X, num.chains = 1, mcmc = mcmc, burn = burn, thin = thin, 
+                            operators = operators, seed = seed + r)
     time.sec <- difftime(Sys.time(), start.time, units = "sec")
     metrics.list$BBT <- compute.metrics(model = "BBT", results.BBT[[1]],
                                         relations.true, as.numeric(time.sec),

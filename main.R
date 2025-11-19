@@ -134,15 +134,16 @@ ICBT.params <- list(alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
 
 success.flag <- list()
 for (i in 0:10) {
-  if (i != 0 || i != 1) {
-    setting = "sparse"
+  if (i != 0 && i != 10) {
+    setting <- "sparse"
     data.params$w.params$sparsity <- i/10
   } else if (i == 0) {
-    setting = "dense"
+    setting <- "dense"
   } else if (i == 10) {
-    setting = "transitive"
+    setting <- "transitive"
     data.params$w.params$sparsity <- 1
   }
+  data.params$w.params$norm <- 5 - 0.5 * i
   results <- run.simulation(num.cores    = num.cores,
                             num.replica  = num.replica,
                             num.entities = num.entities,
