@@ -47,7 +47,53 @@ database$rpsls$y_ij <- database$rpsls$win1
 ###    Import Real Data    ###
 ###------------------------###
 
-# Import from BradleyTerry2 package
+## Import baseball data from retrosheet (2020-2025)
+years <- 2020:2025
+gamelogs.list <- lapply(years, function(y) {
+  fname <- file.path(getwd(), paste0("baseball/gl", y, ".csv"))
+  read.csv(fname, header = FALSE, stringsAsFactors = FALSE)
+})
+gamelog <- bind_rows(gamelogs.list) %>%
+  mutate(
+    V4 = if_else(V4 == "OAK", "ATH", V4),
+    V7 = if_else(V7 == "OAK", "ATH", V7)
+  )
+results <- gamelog %>%
+  mutate(
+    winner = if_else(V10 > V11, V4, V7),
+    loser  = if_else(V10 > V11, V7, V4)
+  )
+results <- results[, c("winner", "loser")]
+database$name.mlb <- sort(unique(c(results$winner, results$loser)))
+num.teams <- length(database$name.mlb)
+
+# Convert to binomial format
+database$mlb <- expand.grid(
+  player1 = database$name.mlb,
+  player2 = database$name.mlb,
+  stringsAsFactors = FALSE
+) %>%
+  filter(player1 < player2)
+
+database$mlb <- database$mlb %>%
+  mutate(
+    win1 = mapply(function(a, b) mlb.matrix[a, b], player1, player2),
+    win2 = mapply(function(a, b) mlb.matrix[b, a], player1, player2),
+    n_ij = win1 + win2,
+    y_ij = win1
+  )
+database$freq.mlb <- nrow(gamelog)
+database$mlb <- database$mlb %>%
+  mutate(
+    player1 = factor(player1, levels = database$name.mlb),
+    player2 = factor(player2, levels = database$name.mlb)
+  )
+database$network.mlb <- plot.networks(compute.M(database$mlb), num.entities = num.teams, components = c("M"),
+                                      draw.flag = FALSE, weight = "prop", layout = "fr", tie_mode = "thin")
+
+
+
+## Import from BradleyTerry2 package
 data(citations)
 database$citations4 <- countsToBinomial(citations) 
 database$citations4$n_ij <- database$citations4$win1 + database$citations4$win2
@@ -58,7 +104,7 @@ database$network.citations4 <- plot.networks(compute.M(database$citations4), num
 
 
 
-# Cross-citations involving probability journals, giving total citations for the years 1987-88. 
+## Cross-citations involving probability journals, giving total citations for the years 1987-88. 
 # Rows correspond to citing journal, columns to cited journal.
 citation.matrix <- matrix(c(
   468, 255,  33,  46,  72,   74,  # AnnPr
@@ -218,36 +264,5 @@ database$cornflakes$n_ij <- database$cornflakes$win1 + database$cornflakes$win2
 database$cornflakes$y_ij <- database$cornflakes$win1
 database$network.cornflakes <- plot.networks(compute.M(database$cornflakes), num.entities = 7, components = c("M"), 
                                              draw.flag = FALSE, weight = "prop", layout = "fr", tie_mode = "thin")
-
-
-
-# Sushi A (N = 10) preference data collected in Kamishima (2003)
-sushiA.data <- read.csv("Sushi A.csv", header = FALSE, sep = " ")
-sushiA.data <- sushiA.data[2:nrow(sushiA.data), 3:12]
-sushiA.matrix <- matrix(0, nrow = 10, ncol = 10, dimnames = list(1:10, 1:10))
-
-# Name the rows and columns
-rownames(sushiA.matrix) <- colnames(sushiA.matrix) <-
-  database$name.sushiA <- c("shrimp", "sea eel", "tuna", "squid", "sea urchin",
-                            "salmon roe", "egg", "fatty tuna", "tuna roll", "cucumber  roll")
-
-pairs.list <- lapply(seq_len(nrow(sushiA.data)), function(i) {
-  row <- as.numeric(sushiA.data[i, ])
-  t(combn(row, 2))
-})
-pairs.list <- as.data.frame(do.call(rbind, pairs.list))
-colnames(pairs.list) <- c("winner", "loser")
-
-pairs.counts <- table(pairs.list)
-winner.idx <- as.numeric(rownames(pairs.counts)) + 1
-loser.idx <- as.numeric(colnames(pairs.counts)) + 1
-sushiA.matrix[winner.idx, loser.idx] <- pairs.counts
-
-# Convert to binomial format using countsToBinomial
-database$sushiA <- countsToBinomial(sushiA.matrix)
-database$sushiA$n_ij <- database$sushiA$win1 + database$sushiA$win2
-database$sushiA$y_ij <- database$sushiA$win1
-database$network.sushiA <- plot.networks(compute.M(database$sushiA), num.entities = 10, components = c("M"), 
-                                         draw.flag = FALSE, weight = "prop", layout = "fr", tie_mode = "thin")
 
 ##########################  END import database  ###############################

@@ -13,26 +13,28 @@ source("functions.R")
 source("database.R")
 
 ## For Real Data:
-#X <- database$sushiA
-#entities.name <- database$name.sushiA
-#network.true <- database$network.sushiA
-#N <- length(entities.name)  # number of entities
-#triplets <- t(combn(1:N, 3))
-#num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
-#networks.true <- plot.networks(compute.M(X), num.entities = N, components = c("M"),
-#                               weight = "prop", layout = "circle", tie_mode = "skip")
+X <- database$mlb
+entities.name <- database$name.mlb
+network.true <- database$network.mlb
+num.entities <- length(entities.name)  # number of entities
+triplets <- t(combn(1:num.entities, 3))
+num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
+num.free <- choose(num.entities-1,2)
+networks.true <- plot.networks(compute.M(X), num.entities = num.entities, components = c("M"),
+                               weight = "prop", layout = "circle", tie_mode = "skip")
 
 ## For Artificial Data:
-num.entities <- 5
+num.entities <- 4
 triplets <- t(combn(1:num.entities, 3))
 num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
 num.free <- choose(num.entities-1,2)
 w.true <- rep(0, num.free)
-w.true[1] <- 5
+# w.true[1] <- 5
 #w.true[6] <- 4
 #w.true[8] <- 6
-# w.true <- compute.spPhi.true(num.entities = N, norm = 6, seed = 1, sparsity.level = 0.95)$weights
-artificial.data <- generate.artificial.data(num.entities = num.entities, s_interval = 0.5, freq.pair = 50, weights = w.true)
+w.true <- compute.spPhi.true(num.entities = num.entities, norm = 2.5, seed = 1, 
+                             sparsity.level = 0.5)$weights
+artificial.data <- generate.artificial.data(num.entities = num.entities, s_interval = 0.5, freq.pair = 100, weights = w.true)
 X <- artificial.data$X
 entities.name <- artificial.data$entity.names
 networks.true <- plot.networks(artificial.data$relations, num.entities = num.entities,
@@ -45,16 +47,12 @@ networks.true <- plot.networks(artificial.data$relations, num.entities = num.ent
 
 #########################  BEGIN MCMC & Visualization  #########################
 
-## Bradley-Terry model
-BT.results <- BT.freq(X, sort.flag = FALSE, desc.flag = FALSE, draw.flag = FALSE, decimal = 5)
-
-
 ## Preparation
 num.chains <- 1
 num.iter <- 10000
 num.burn <- num.iter/5
-model <- "IBT.cpp"   # Options: (IBT.R, IBT.cpp, ICBT, BBT.Stan, BBT.cpp, BBT.R)
-param.name <- "s" # Options: (s, sigma, weights, Phi, lambda, tau, nu, xi, grad, curl, M)
+model <- "ICBT"   # Options: (IBT.R, IBT.cpp, ICBT, BBT.Stan, BBT.cpp, BBT.R)
+param.name <- "curl_re" # Options: (s, sigma, weights, Phi, lambda, tau, nu, xi, grad, curl, M)
 
 ## Prior specification
 BBT.priors <- list(s.prior       = rep(0, num.entities), sigma.prior = 2.5)
@@ -96,10 +94,45 @@ estimates.list <- lapply(estimates.list, `[[`, statistic)
 relations.estimates <- do.call(cbind, estimates.list)
 colnames(relations.estimates) <- components
 network.estimates <- plot.networks(relations.estimates, num.entities = num.entities,
-                                   components = components, 
+                                   components = components,
                                    layout.coords = networks.true$layout,
                                    weight = "prop", layout = "circle", tie_mode = "skip")
 plot.reversed_edges(network.estimates$graphs, networks.true$graphs, networks.true$layout)
+
+
+
+## Plot parameters 's'
+points.ICBT <- BT.freq(X, sort.flag = FALSE, desc.flag = FALSE, draw.flag = TRUE, decimal = 5) # ICBT model
+points.ICBT <- points.ICBT$s - mean(points.ICBT$s)
+
+## Prior specification
+BBT.priors <- list(s.prior       = rep(0, num.entities), sigma.prior = 2.5)
+IBT.priors <- list(s.prior       = rep(0, num.entities),
+                   sigma.prior   = 2.5,
+                   weights.prior = rep(0, num.free),
+                   lambda.prior  = rep(1, num.free), 
+                   tau.prior     = 1, 
+                   nu.prior      = rep(1, num.free), 
+                   xi.prior      = 1)
+ICBT.priors <- list(alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
+                    gamma_A = 1, lambda_A = 10, nu_A = 1)
+
+# BBT model
+mcmc.BBT <- run.MCMCs(model = "BBT.Stan", num.chains = 1, name = "s", num.entities = num.entities,
+                      MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
+                      X, mcmc = 10000, burn = 2000, thin = 1, seed = 73,
+                      IBT.params = IBT.priors, ICBT.params = ICBT.priors, BBT.params = BBT.priors)
+
+# IBT model
+mcmc.IBT <- run.MCMCs(model = "IBT.cpp", num.chains = 1, name = "s", num.entities = num.entities,
+                      MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
+                      X, mcmc = 10000, burn = 2000, thin = 1, seed = 73,
+                      IBT.params = IBT.priors, ICBT.params = ICBT.priors, BBT.params = BBT.priors)
+
+plot.s(mcmc.BBT = mcmc.BBT$name.mcmc[[1]], points.ICBT = points.ICBT, 
+       mcmc.IBT = mcmc.IBT$name.mcmc[[1]], names = entities.name, order = "desc")
+plot.relations(mcmc.IBT = mcmc.IBT, Types = c("grad", "curl", "M"), 
+               num.entities = num.entities, names = entities.name, order = "desc")
 
 ##########################  END MCMC & Visualization  ##########################
 
@@ -110,7 +143,7 @@ plot.reversed_edges(network.estimates$graphs, networks.true$graphs, networks.tru
 ## Setting
 num.cores    <- 10    # the number of cores to parallel
 num.replica  <- 100   # the number of datasets
-num.entities <- 5    # the number of entities
+num.entities <- 10    # the number of entities
 num.triplets <- choose(num.entities,3)
 num.free <- choose(num.entities-1,2)
 
@@ -121,7 +154,7 @@ mcmc.params <- list(mcmc   = 10000,
                     hpd    = TRUE)
 data.params <- list(s.sd = 1,
                     freq.range = c(100, 100),
-                    w.params = list(norm = 2, sparsity = 0.2))
+                    w.params = list(norm = 2, sparsity = 0))
 IBT.params <- list(s.prior       = rep(0, num.entities),
                    sigma.prior   = 2.5,
                    weights.prior = rep(0, num.free),
@@ -156,12 +189,15 @@ for (i in 0:10) {
   success.flag[i] <- store.csv(results$All, num.entities = num.entities)
 }
 
-df <- read.csv(file.path(getwd(), paste0("results/metrics1_", num.entities, ".csv")))
+df <- read.csv(file.path(getwd(), paste0("N = 10_freq = 100_ns/metrics1_", num.entities, ".csv")))
 tmp <- df[df$Estimator == "Mean", ]
-plot.Metrics1(tmp)
+plot.Metrics1(tmp, Types = c("MSE_M", "MSE_grad", "MSE_curl"))
 
-df <- read.csv(file.path(getwd(), paste0("results/metrics2_", num.entities, ".csv")))
-tmp <- df[df$Estimator == "Mean" & df$sparsity == 1, ]
+df <- read.csv(file.path(getwd(), paste0("N = 10_freq = 100_ns/metrics2_", num.entities, ".csv")))
+tmp <- df[df$Estimator == "Mean" & df$sparsity == 0.5, ]
 plot.Metrics2(tmp)
+
+df <- read.csv(file.path(getwd(), paste0("N = 10_freq = 100_ns/CP_", num.entities, ".csv")))
+df[df$Model == "ICBT" & df$Estimator == "Mean" & df$sparsity == 0.5, ]
 
 ##############################  END Simulations  ###############################

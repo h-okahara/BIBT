@@ -16,6 +16,7 @@ library(parallel)       # Support for parallel computation
 library(patchwork)      # Combines multiple ggplot2 plots into one layout
 library(pg)             # Pólya-Gamma data augmentation in C++
 library(purrr)          # Import R codes of ICBT model (Spearing et al.,2023)
+library(reshape2)       # Convert wide data to long form
 library(Rcpp)           # Runs C++ code from R
 library(scales)         # Rescales data for visualization
 library(tidyr)          # Tidy messy data

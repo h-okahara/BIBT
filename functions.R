@@ -597,8 +597,8 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE,
                     networks.true = NULL, draw.flag = FALSE, decimal = 3) {
   ## Preparation
   entity.name <- unique(c(X$player1, X$player2))
-  N <- length(entity.name)  # number of entities
-  reference <- entity.name[N] # fix the last entity
+  num.entities <- length(entity.name)    # number of entities
+  reference <- entity.name[num.entities] # fix the last entity
   citeModel <- BTm(data = X, outcome = cbind(win1, win2), player1, player2,
                    formula = ~player, id = "player", refcat = as.character(reference))
   
@@ -615,22 +615,22 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE,
     names.sorted <- rownames(citations.qv$qvframe)[idx]
     if (draw.flag) plot(citations.qv.sorted, levelNames = names.sorted)
   } else {
-    qvframe.sorted <- citations.qv$qvframe[rep(1:N), ]
+    qvframe.sorted <- citations.qv$qvframe[rep(1:num.entities), ]
     citations.qv.sorted <- citations.qv
     citations.qv.sorted$qvframe <- qvframe.sorted
-    names.sorted <- rownames(citations.qv$qvframe)[1:N]
+    names.sorted <- rownames(citations.qv$qvframe)[1:num.entities]
     if (draw.flag) plot(citations.qv.sorted, levelNames = names.sorted) 
   }
   
   ## Visualization
-  pairs <- t(combn(N, 2))
+  pairs <- t(combn(num.entities, 2))
   M.BT <- citations.qv$qvframe$estimate[pairs[,1]] - citations.qv$qvframe$estimate[pairs[,2]]
   relations.BT <- round(cbind(M.BT, M.BT), decimal)
   colnames(relations.BT) <- c("grad", "M")
   
   layout.coords <- NULL
   if (!is.null(networks.true)) layout.coords <- networks.true$layout
-  network.BT <- plot.networks(relations.BT, num.entities = N, components = c("grad", "M"), 
+  network.BT <- plot.networks(relations.BT, num.entities = num.entities, components = c("grad", "M"), 
                               layout.coords = layout.coords, draw.flag = draw.flag,
                               weight = "prop", layout = "circle", tie_mode = "skip")
   if (draw.flag && !is.null(networks.true)) plot.reversed_edges(network.BT$graphs, networks.true$graphs, networks.true$layout)
@@ -939,12 +939,27 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains = NULL,
     if(ncol(mcmc.chains[[1]])!=num.pairs){stop("Number of pairs is not equal to the length of M")}
     
     ## Set up the plotting area
-    par(mfrow = c(1, num.pairs), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
+    par(mfrow = c(1, num.pairs), mar = c(2, 2.5, 2.5, 1), oma = c(1, 1, 2, 1), pty = "s")
+    
+    # Define title
+    title.label <- switch(
+      name,
+      "grad"    = quote(grad),
+      "curl"    = quote(curl),
+      "curl_re" = quote(theta),
+      "M"       = quote(M)
+    )
     
     ## Loop over each pair to plot histogram with density curve
     for (p in 1:num.pairs) {
-      hist(mcmc.chains[[1]][, p], breaks = bins, col = "skyblue", border = "white", probability = TRUE,
-           xlab = name, main = paste0(name, "_", pairs[p,1], pairs[p,2]))
+      hist(mcmc.chains[[1]][, p], 
+           breaks = bins,
+           col = "skyblue",
+           border = "white",
+           probability = TRUE,
+           xlab = name,
+           main = bquote(.(title.label)[.(pairs[p,1]) * .(pairs[p,2])])#^"*")
+           )
       
       # Overlay density curves from all chains
       if (num.chains > 1) {
@@ -2309,6 +2324,8 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   type3.summary <- type3.summary[order(type3.summary$Model, type3.summary$Level), ]
   row.names(type3.summary) <- NULL
   
+  ## Append norm & sparsity columns
+  type1.summary$norm <- type2.summary$norm <- type3.summary$norm <- data.params$w.params$norm
   if (setting == "transitive") {
     type1.summary$sparsity <- type2.summary$sparsity <- type3.summary$sparsity <- 1
   } else if (setting == "sparse") {
@@ -2417,6 +2434,263 @@ store.csv <- function(results = NULL, num.entities = NULL) {
 
 ######################  BEGIN Functions for Visualization  #####################
 
+###----------------------------------###
+###    Plot 's' (Vertex Function)    ###
+###----------------------------------###
+
+## INPUT:
+# mcmc.BBT:     A matrix of MCMC samples 's' of the BBT model;
+# points.ICBT:  A vector of point estimates 's' of the BT model;
+# mcmc.IBT:     A matrix of MCMC samples 's' of the IBT model;
+# names:        Optional vector of entity names. If NULL, numeric labels are used.
+# order:        Ordering flag to change the order of entities. (e.g., "asc" and "desc")
+
+## OUTPUT:
+# Creates a grouped violin plot for each model.
+
+plot.s <- function(mcmc.BBT = NULL, points.ICBT = NULL, mcmc.IBT = NULL, names = NULL, order = NULL) {
+  ## Preparation
+  num.entities <- ncol(mcmc.BBT)
+  if(is.null(names)) {
+    names <- as.character(paste("Entity", 1:num.entities))
+  }
+  BBT.df <- as.data.frame(mcmc.BBT)
+  IBT.df <- as.data.frame(mcmc.IBT)
+  colnames(BBT.df) <- colnames(IBT.df) <- names
+  
+  ## Determine Sort Order
+  if (!is.null(order)) {
+    means.IBT <- colMeans(IBT.df, na.rm = TRUE)
+    
+    if (order == "desc") {
+      names.sorted <- names[order(means.IBT, decreasing = TRUE)]
+    } else if (order == "asc") {
+      names.sorted <- names[order(means.IBT, decreasing = FALSE)]
+    }
+  } else {
+    names.sorted <- names
+  }
+  
+  ## Calculate Posterior Means
+  means.BBT <- colMeans(BBT.df, na.rm = TRUE)
+  means.IBT <- colMeans(IBT.df, na.rm = TRUE)
+  means.df <- data.frame(
+    Team = rep(names, 2),
+    Value = c(means.BBT, means.IBT),
+    Model = rep(c("BBT", "IBT"), each = length(names))
+  )
+  
+  ## Reshape Data to Long Format
+  # BBT model
+  BBT.df_long <- BBT.df %>%
+    pivot_longer(cols = everything(), names_to = "Team", values_to = "Value") %>%
+    mutate(Model = "BBT")
+  
+  # IBT model
+  IBT.df_long <- IBT.df %>%
+    pivot_longer(cols = everything(), names_to = "Team", values_to = "Value") %>%
+    mutate(Model = "IBT")
+  
+  # ICBT model
+  ICBT.df_long <- data.frame(
+    Team = names,
+    Value = points.ICBT,
+    Model = "ICBT"
+  )
+
+  # Bind MCMC data
+  mcmc.df <- bind_rows(BBT.df_long, IBT.df_long)
+  
+  ## Apply Factor Levels
+  mcmc.df$Team <- factor(mcmc.df$Team, levels = names.sorted)
+  means.df$Team <- factor(means.df$Team, levels = names.sorted)
+  ICBT.df_long$Team <- factor(ICBT.df_long$Team, levels = names.sorted)
+
+  ## Define Plot
+  g <- ggplot() +
+    geom_violin(data = mcmc.df,
+                aes(x = Team, y = Value, fill = Model, color = Model),
+                alpha = 0.3, scale = "width", position = position_dodge(width = 0.8)) +
+
+    geom_point(data = means.df,
+               aes(x = Team, y = Value, color = Model, shape = Model, group = Model),
+               size = 3, 
+               position = position_dodge(width = 0.8),
+               show.legend = TRUE) +
+    
+    geom_point(data = ICBT.df_long,
+               aes(x = Team, y = Value, shape = Model, color = Model),
+               size = 3, stroke = 1.2) +
+
+    scale_color_manual(name = "Model",
+                       values = c("BBT" = "#0072B2", 
+                                  "ICBT" = "red",
+                                  "IBT" = "#E69F00")) +
+
+    scale_fill_manual(name = "Model",
+                      values = c("BBT" = "#0072B2", 
+                                 "ICBT" = NA, 
+                                 "IBT" = "#E69F00")) +
+
+    scale_shape_manual(name = "Model",
+                       values = c("BBT" = 18, 
+                                  "ICBT" = 18,
+                                  "IBT" = 18)) +
+    guides(fill = "none") +
+    labs(title = "",
+         y = "score parameters 's'",
+         x = "Teams") +
+    
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
+      axis.text.x = element_text(size = 20, angle = 70, vjust = 1, hjust = 1),
+      axis.title.x = element_text(size = 18),
+      axis.title.y = element_text(size = 18),
+      legend.position = "bottom",
+      legend.text = element_text(size = 14),
+      legend.title = element_text(size = 16)
+    )
+  return(g)
+}
+
+
+
+
+###-----------------------------------###
+###    Plot Relations (Edge flows)    ###
+###-----------------------------------###
+
+## INPUT:
+# mcmc.IBT:     A matrix of MCMC samples 'curl' of the IBT model;
+# num.entities: Number of entities (e.g., items and players).
+# names:        Optional vector of entity names. If NULL, numeric labels are used.
+# order:        Ordering flag to change the order of entities. (e.g., "asc" and "desc")
+
+## OUTPUT:
+# Creates a heatmap of the curl parameter.
+
+plot.relations <- function(mcmc.IBT = NULL, Types = c("grad", "curl", "M"), 
+                           num.entities = NULL, names = NULL, order = NULL) 
+  {
+  ## Preparation
+  plot.list <- list()
+  num.pairs <- choose(num.entities,2)
+  if(is.null(names)) {
+    names <- as.character(paste("Entity", 1:num.entities))
+  }
+  s_IBT <- as.data.frame(mcmc.IBT[["s"]])
+  means.s_IBT <- colMeans(s_IBT, na.rm = TRUE)
+  
+  ## Compute Scale (min, max)
+  values_all <- c()
+  for (type in Types) {
+    if (!is.null(mcmc.IBT[[type]])) {
+      vals <- colMeans(mcmc.IBT[[type]], na.rm = TRUE)
+      values_all <- c(values_all, vals)
+    }
+  }
+  values_max <- max(abs(values_all), na.rm = TRUE)
+  common.scale <- c(-values_max, values_max)
+  
+  ## Store each graph object into plot.list
+  for (type in Types) {
+    # Reconstruct Skew-Symmetric Matrix
+    type.means <- colMeans(mcmc.IBT[[type]], na.rm = TRUE)
+    type.mat <- matrix(0, num.entities, num.entities)
+    type.mat[upper.tri(type.mat, diag = FALSE)] <- type.means
+    type.mat <- type.mat - t(type.mat)
+    rownames(type.mat) <- colnames(type.mat) <- names
+    
+    # Define title
+    type.title <- switch(
+      type,
+      "grad" = "Gradient Flow",
+      "curl" = "Curl Flow",
+      "M"    = "Match-up"
+    )
+    
+    ## Determine Sort Order
+    if (!is.null(order)) {
+      if (order == "desc") {
+        ord.idx <- order(means.s_IBT, decreasing = TRUE)
+      } else if (order == "asc") {
+        ord.idx <- order(means.s_IBT, decreasing = FALSE)
+      }
+      type.mat <- type.mat[ord.idx, ord.idx]
+      names.sorted <- rownames(type.mat)
+    } else {
+      names.sorted <- names
+    }
+    
+    ## Reshape Data to Long Format
+    df_long <- melt(type.mat)
+    colnames(df_long) <- c("Team1", "Team2", "Value")
+    df_long$Team1 <- factor(df_long$Team1, levels = rev(names.sorted)) # Reverse for Y-axis
+    df_long$Team2 <- factor(df_long$Team2, levels = names.sorted)      # X-axis
+    names.idx <- setNames(1:num.entities, names.sorted)
+    
+    df_long <- df_long %>%
+      mutate(
+        idx_row = names.idx[as.character(Team1)],
+        idx_col = names.idx[as.character(Team2)]
+      ) %>%
+      mutate(
+        Value_Plot = ifelse(idx_row > idx_col, Value, NA)
+      )
+    
+    ## Define Plot
+    p <- ggplot(df_long, aes(x = Team2, y = Team1)) +
+      geom_tile(aes(fill = Value_Plot), color = "white", size = 0.2) +
+  
+      scale_fill_gradient2(
+        low = "blue", mid = "white", high = "red", midpoint = 0,
+        na.value = "grey50",
+        name = "Value",
+        limits = common.scale
+      ) +
+      coord_fixed() +
+      guides(
+        fill = guide_colorbar(
+          barwidth = unit(5, "cm"),
+          barheight = unit(1, "cm"),
+          title.position = "left",
+          label.position = "bottom"
+        )
+      ) +
+      
+      labs(title = type.title, x = NULL, y = NULL) +
+      scale_x_discrete(position = "bottom") +
+      scale_y_discrete() +
+      
+      theme_minimal() +
+      theme(
+        plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
+        axis.text.x = element_text(angle = 70, vjust = 1, hjust = 1, size = 18),
+        axis.text.y = element_text(size = 10),
+        panel.grid = element_blank(),
+        legend.position = "bottom",
+        legend.text = element_text(size = 16),
+        legend.title = element_text(size = 18, vjust = 0.8)
+      )
+    
+    plot.list[[type]] <- p
+  }
+  
+  ## Combine graphs
+  if (length(plot.list) == 3) {
+    plots.combined <- wrap_plots(plot.list, ncol = length(plot.list)) + 
+      plot_layout(guides = "collect") & theme(legend.position = 'bottom')
+    
+    print(plots.combined)
+  } else {
+    lapply(plot.list, print)
+  }
+}
+
+
+
+
 ###---------------------------###
 ###    Plot Match Networks    ###
 ###---------------------------###
@@ -2458,10 +2732,15 @@ plot.networks <- function(relations = NULL, num.entities = NULL, components = c(
     ## Define base graph
     base.name <- if ("M" %in% colnames(relations)) "M" else components[1]
     relation_base.vec <- relations[, base.name]
+    
+    valid_base <- !is.na(relation_base.vec)
+    relation_base.vec <- relation_base.vec[valid_base]
+    pairs_base <- pairs[valid_base, , drop = FALSE]
+    
     p_base <- plogis(relation_base.vec)
     bin_df_base <- data.frame(
-      player1 = pairs[,1], 
-      player2 = pairs[,2],
+      player1 = pairs_base[,1], 
+      player2 = pairs_base[,2],
       win1 = p_base,
       win2 = 1-p_base
     )
@@ -2489,12 +2768,15 @@ plot.networks <- function(relations = NULL, num.entities = NULL, components = c(
   ## Draw a network of each component
   for (comp.name in components) {
     relation.vec <- relations[, comp.name]
+    valid <- !is.na(relation.vec)
+    relation.vec <- relation.vec[valid]
+    pairs_sub <- pairs[valid, , drop = FALSE]
     
     # A data.frame with columns compatible with plot.network
     p <- plogis(relation.vec) # win probability
     bin_df <- data.frame(
-      player1 = pairs[,1],
-      player2 = pairs[,2],
+      player1 = pairs_sub[,1],
+      player2 = pairs_sub[,2],
       win1    = p,
       win2    = 1-p
     )
@@ -2516,7 +2798,8 @@ plot.networks <- function(relations = NULL, num.entities = NULL, components = c(
     if (tie_mode == "skip") {
       edges.df <- edges.df %>% filter(!is_tie)
     }
-    edges.df <- edges.df %>% dplyr::select(from = winner, to = loser, metric, label)
+    edges.df <- edges.df %>% filter(!is.na(metric)) %>% 
+      dplyr::select(from = winner, to = loser, metric, label)
     
     ## Define graph object
     g <- graph_from_data_frame(vertices = nodes.df, d = edges.df, directed = TRUE)
@@ -2554,7 +2837,7 @@ plot.networks <- function(relations = NULL, num.entities = NULL, components = c(
            edge.label = if (edge.label) E(g)$label else NA,
            edge.label.color = "grey20",
            main = sprintf("%s", comp.name)
-      ) 
+      )
     }
     graph.list[[comp.name]] <- g
   }
@@ -2769,9 +3052,14 @@ plot.Metrics1 <- function(results = NULL, Types = c("MSE_M", "MSE_grad", "MSE_cu
   for (type in Types) {
     plot_data <- results
 
-    # この部分は後で消す
-    use_log_scale <- FALSE
-    if (type %in% c("MSE_grad", "MSE_curl") && any(plot_data[[type]] > 1e10, na.rm = TRUE)) use_log_scale <- TRUE
+    # Define title
+    title.label <- switch(
+      type,
+      "MSE_M"    = bquote(MSE[M]),
+      "MSE_grad" = bquote(MSE[grad]),
+      "MSE_curl" = bquote(MSE[curl]),
+      "Accuracy" = bquote(.(type))
+    )
     
     # Create ggplot object
     p <- ggplot(plot_data, 
@@ -2785,19 +3073,22 @@ plot.Metrics1 <- function(results = NULL, Types = c("MSE_M", "MSE_grad", "MSE_cu
       
       # Set the label and title
       labs(
-        title = paste(type, "(", estimator, ")"),
+        title = title.label,
         x = "Sparsity",
-        y = if (use_log_scale) paste(type, "(log10 scale)") else type
+        y = ""
       ) +
       theme_bw() +
       theme(
-        plot.title = element_text(hjust = 0.5, face = "bold"),
+        aspect.ratio = 1,
+        plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
+        axis.title.x = element_text(size = 16),
         legend.position = "bottom",
-        legend.key.width = unit(1, "cm")
+        legend.key.width = unit(1, "cm"),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16)
       )
     
     # Scale y-axis
-    if (use_log_scale) p <- p + scale_y_log10()
     plot.list[[type]] <- p
   }
   
@@ -2805,10 +3096,16 @@ plot.Metrics1 <- function(results = NULL, Types = c("MSE_M", "MSE_grad", "MSE_cu
   if (length(plot.list) == 4) {
     plots.combined <- (plot.list[[1]] + plot.list[[2]]) / 
       (plot.list[[3]] + plot.list[[4]])
+    plots.combined <- plots.combined + theme_bw()
     
     # Collect guides (legends) into one
     plots.combined <- plots.combined + plot_layout(guides = "collect") & theme(legend.position = 'bottom')
     print(plots.combined)
+  } else if (length(plot.list) == 3) {
+    plots.combined <- wrap_plots(plot.list, ncol = length(plot.list)) + 
+      plot_layout(guides = "collect") & theme(legend.position = 'bottom')
+    
+    print(plots.combined) 
   } else {
     lapply(plot.list, print)
   }
@@ -2854,17 +3151,20 @@ plot.Metrics2 <- function(results = NULL) {
     
     # Set the label and title
     labs(
-      title = estimator,
+      title = "Recall & Precition",
       x = "Level",
-      y = "Metric Value",
+      y = "",
       color = "Model",
       linetype = "Metric"
     ) +
     theme_bw() +
     theme(
-      plot.title = element_text(hjust = 0.5, face = "bold"),
+      plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
+      axis.title.x = element_text(size = 16),
       legend.position = "bottom",
-      legend.key.width = unit(1.5, "cm")
+      legend.key.width = unit(1.5, "cm"),
+      legend.text = element_text(size = 14),
+      legend.title = element_text(size = 16)
       )
 }
 
