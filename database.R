@@ -66,6 +66,10 @@ results <- gamelog %>%
 results <- results[, c("winner", "loser")]
 database$name.mlb <- sort(unique(c(results$winner, results$loser)))
 num.teams <- length(database$name.mlb)
+mlb.matrix <- table(
+  factor(results$winner, levels = database$name.mlb),
+  factor(results$loser, levels = database$name.mlb)
+)
 
 # Convert to binomial format
 database$mlb <- expand.grid(
