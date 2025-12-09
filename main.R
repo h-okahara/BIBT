@@ -186,18 +186,19 @@ for (i in 0:10) {
                             data.params  = data.params,
                             IBT.params   = IBT.params,
                             ICBT.params  = ICBT.params)
-  success.flag[i] <- store.csv(results$All, num.entities = num.entities)
+  success.flag[i] <- store.csv(results$All, num.entities = num.entities, file.name = "results")
 }
 
-df <- read.csv(file.path(getwd(), paste0("N = 10_freq = 100_ns/metrics1_", num.entities, ".csv")))
+df <- read.csv(file.path(getwd(), paste0("N = ", num.entities, "_freq = 5-100_ns/metrics1_", num.entities, ".csv")))
 tmp <- df[df$Estimator == "Mean", ]
 plot.Metrics1(tmp, Types = c("MSE_M", "MSE_grad", "MSE_curl"))
+plot.Metrics1(tmp, Types = c("Accuracy"))
 
-df <- read.csv(file.path(getwd(), paste0("N = 10_freq = 100_ns/metrics2_", num.entities, ".csv")))
-tmp <- df[df$Estimator == "Mean" & df$sparsity == 0.5, ]
+df <- read.csv(file.path(getwd(), paste0("N = ", num.entities, "_freq = 5-100_ns/metrics2_", num.entities, ".csv")))
+tmp <- df[df$Estimator == "Mean" & df$sparsity == 0.9, ]
 plot.Metrics2(tmp)
 
-df <- read.csv(file.path(getwd(), paste0("N = 10_freq = 100_ns/CP_", num.entities, ".csv")))
-df[df$Model == "ICBT" & df$Estimator == "Mean" & df$sparsity == 0.5, ]
+df <- read.csv(file.path(getwd(), paste0("N = ", num.entities, "_freq = 5-100_ns/CP_", num.entities, ".csv")))
+df[df$Model == "IBT" & df$Estimator == "Mean" & df$sparsity == 0.9, ]
 
 ##############################  END Simulations  ###############################

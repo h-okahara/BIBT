@@ -2072,9 +2072,13 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
       
       Recall    <- ifelse(num.nonzero_true == 0, 0, num.nonzero_detected / num.nonzero_true)
       Precision <- ifelse(num.nonzero_hat == 0, 0, num.nonzero_detected / num.nonzero_hat)
+      
+      F1.denominator <- Recall + Precision
+      F1.numerator   <- 2 * Recall * Precision
+      F1             <- ifelse(F1.denominator == 0, 0, F1.numerator / F1.denominator)
     } else {
       CP_curl.flag <- rep(NA, length(curl_true))
-      Recall <- Precision <- NaN
+      Recall <- Precision <- F1 <- NaN
     }
     
     # Helper Function to store Coverage flag
@@ -2093,6 +2097,7 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
                           Accuracy  = Accuracy.mean,
                           Recall    = Recall,
                           Precision = Precision,
+                          F1        = F1,
                           Time      = time,
                           CP_M      = make.CP_cols(CP_M.flag),
                           CP_grad   = make.CP_cols(CP_grad.flag),
@@ -2107,6 +2112,7 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
                             Accuracy  = Accuracy.median,
                             Recall    = Recall,
                             Precision = Precision,
+                            F1        = F1,
                             Time      = time,
                             CP_M      = make.CP_cols(CP_M.flag),
                             CP_grad   = make.CP_cols(CP_grad.flag),
@@ -2236,7 +2242,7 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
       
       # Create Null list
       name.cols <- c("Model", "Estimator", "Level", "MSE_M", "MSE_grad", "MSE_curl", 
-                     "Accuracy", "Recall", "Precision", "Time",
+                     "Accuracy", "Recall", "Precision", "F1", "Time",
                      paste0("CP_M.X", 1:num.pairs), paste0("CP_grad.X", 1:num.pairs), paste0("CP_curl.X", 1:num.pairs))
       num.rows <- 2 * length(levels)
       num.cols <- length(name.cols)
@@ -2276,7 +2282,7 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
   cat("Step 3: Aggregating results...\n")
   base.cols <- c("Model", "Estimator")
   type1.cols <- c("MSE_M", "MSE_grad", "MSE_curl", "Accuracy", "Time")
-  type2.cols <- c("Level", "Recall", "Precision")
+  type2.cols <- c("Level", "Recall", "Precision", "F1")
   type3.cols <- setdiff(names(results.df), c(base.cols, type1.cols, type2.cols))
   
   ## For Numerical Metrics (MSE, Accuracy, Time)
@@ -2357,18 +2363,20 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
 ###---------------------------------###
 
 ## INPUT:
-# results:  A data frame from run.simulation() (e.g., results$All) containing
-#           three data frames: $Metrics1, $Metrics2, and $CP;
+# results:      A data frame from run.simulation() (e.g., results$All) containing
+#               three data frames: $Metrics1, $Metrics2, and $CP;
+# num.entities: Number of entities (e.g., items and players);
+# file.name:    A file name to store output.
 
 ## OUTPUT:
 # Returns an invisible TRUE if all write operations succeed.
 # This function appends the input data frames to 'results/metrics1.csv', 'results/metrics2.csv', and 'results/CP.csv'.
 
-store.csv <- function(results = NULL, num.entities = NULL) {
+store.csv <- function(results = NULL, num.entities = NULL, file.name = "results") {
   ## Preparation
-  filepath.metrics1 <- file.path(getwd(), paste0("results/metrics1_", num.entities, ".csv"))
-  filepath.metrics2 <- file.path(getwd(), paste0("results/metrics2_",num.entities, ".csv"))
-  filepath.CP       <- file.path(getwd(), paste0("results/CP_",num.entities, ".csv"))
+  filepath.metrics1 <- file.path(getwd(), paste0(file.name, "/metrics1_", num.entities, ".csv"))
+  filepath.metrics2 <- file.path(getwd(), paste0(file.name, "/metrics2_",num.entities, ".csv"))
+  filepath.CP       <- file.path(getwd(), paste0(file.name, "/CP_",num.entities, ".csv"))
   file1.flag <- file.exists(filepath.metrics1)
   file2.flag <- file.exists(filepath.metrics2)
   file3.flag <- file.exists(filepath.CP)
@@ -3048,6 +3056,12 @@ plot.Metrics1 <- function(results = NULL, Types = c("MSE_M", "MSE_grad", "MSE_cu
   estimator <- unique(results$Estimator)
   plot.list <- list()
   
+  if (length(Types) == 1) {
+    aspect.ratio <- 0.6
+  } else {
+    aspect.ratio <- 1
+  }
+  
   ## Store each graph object into plot.list
   for (type in Types) {
     plot_data <- results
@@ -3079,7 +3093,7 @@ plot.Metrics1 <- function(results = NULL, Types = c("MSE_M", "MSE_grad", "MSE_cu
       ) +
       theme_bw() +
       theme(
-        aspect.ratio = 1,
+        aspect.ratio = aspect.ratio,
         plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
         axis.title.x = element_text(size = 16),
         legend.position = "bottom",
@@ -3151,7 +3165,7 @@ plot.Metrics2 <- function(results = NULL) {
     
     # Set the label and title
     labs(
-      title = "Recall & Precition",
+      title = "Recall & Precision",
       x = "Level",
       y = "",
       color = "Model",
@@ -3159,6 +3173,7 @@ plot.Metrics2 <- function(results = NULL) {
     ) +
     theme_bw() +
     theme(
+      aspect.ratio = 0.6,
       plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
       axis.title.x = element_text(size = 16),
       legend.position = "bottom",
