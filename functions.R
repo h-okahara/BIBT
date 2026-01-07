@@ -86,7 +86,9 @@ IBT.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
        xi      = as.matrix(result.cpp$xi), 
        grad    = result.cpp$grad,
        curl    = result.cpp$curl,
-       M       = result.cpp$M)
+       M       = result.cpp$M,
+       I       = result.cpp$I,
+       C       = result.cpp$C)
 }
 
 
@@ -199,6 +201,11 @@ IBT.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
   curl.flow <- as.vector(C.ast %*% Phi)
   M.vec <- grad.flow + curl.flow
   
+  ## Intransitivity Measure
+  curl.norm <- crossprod(curl.flow)
+  M.norm <- crossprod(M.vec)
+  intransitivity <- if(M.norm > 0) curl.norm / M.norm else 0
+  
   ## Define matrices for posterior samples
   mcmc.row <- as.integer((mcmc-burn) / thin)
   s.pos         <- matrix(0, nrow = mcmc.row, ncol = N)
@@ -213,6 +220,8 @@ IBT.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
   grad.pos      <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
   curl.pos      <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
   M.pos         <- matrix(0, nrow = mcmc.row, ncol = num.pairs)
+  I.pos         <- matrix(0, nrow = mcmc.row, ncol = 1)
+  C.pos         <- matrix(0, nrow = mcmc.row, ncol = num.triplets)
   
   sample.idx <- 0
   #=======================   BEGIN MCMC sampling   =============================
@@ -274,6 +283,11 @@ IBT.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
     curl.flow <- as.vector(C.ast %*% Phi)
     M.vec <- grad.flow + curl.flow
     
+    curl.norm <- crossprod(curl.flow)
+    M.norm <- crossprod(M.vec)
+    intransitivity <- if(M.norm > 0) curl.norm / M.norm else 0
+    vorticity <- crossprod(C.ast, curl.flow)
+    
     # ------------------------  END Updating  ----------------------------------
     if (iter > burn && (iter-burn) %% thin == 0) { # Store posterior samples
       sample.idx <- sample.idx + 1
@@ -291,13 +305,15 @@ IBT.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
       grad.pos[sample.idx,]       <- as.vector(grad.flow)
       curl.pos[sample.idx,]       <- as.vector(curl.flow)
       M.pos[sample.idx, ]         <- as.vector(M.vec)
+      I.pos[sample.idx, ]         <- as.numeric(intransitivity)
+      C.pos[sample.idx, ]         <- as.vector(vorticity)
     }
   }
   #=======================   END MCMC sampling   ===============================
   
   list(s = s.pos, sigma = sigma.pos, weights = weights.pos, Phi = Phi.pos, 
        lambda = lambda.pos, tau = tau.pos, nu = nu.pos, xi = xi.pos, 
-       grad = grad.pos, curl = curl.pos, M = M.pos)
+       grad = grad.pos, curl = curl.pos, M = M.pos, I = I.pos, C = C.pos)
 }
 
 
@@ -874,9 +890,16 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, 
     mcmc <- nrow(mcmc.chains[[1]])
     
     ## Set up the plotting area
-    par(mfrow = c(1, 1), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
+    par(mfrow = c(1, 1), mar = c(1, 2, 1, 1), oma = c(1, 1, 2, 1))
     plot(1:mcmc, mcmc.chains[[1]][, 1], type = "l", col = 1,
-         xlab = "Iteration", ylab = "", main = name)
+         xlab = "Iteration", ylab = "")
+    abline(h = colMeans(mcmc.chains[[1]]), col = "red", lty = 2, lwd = 2)
+    
+    if (name == "I") {
+      title.label <- "MCMC Sample Paths for Intransitivity Measure"
+    } else {
+      title.label <- paste0("MCMC Sample Paths for ", name)
+    }
     
     # Overlay traces for remaining chains
     if (num.chains > 1) {
@@ -884,11 +907,9 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, 
         lines(1:mcmc, mcmc.chains[[i]][, 1], col = i)
       }
     }
-    mtext(paste("MCMC Sample Paths for", name), outer = TRUE, cex = 1.5)
+    mtext(title.label, outer = TRUE, cex = 1.5)
   }
 }
-
-
 
 
 ###--------------------------------###
@@ -1020,11 +1041,18 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains = NULL,
     mcmc <- nrow(mcmc.chains[[1]])
     
     ## Set up the plotting area
-    par(mfrow = c(1, 1), mar = c(1, 2, 2, 1), oma = c(1, 1, 2, 1))
-    hist(mcmc.chains[[1]][, 1], breaks = bins, col = "skyblue", border = "white", probability = TRUE,
-         xlab = name, main = name)
+    par(mfrow = c(1, 1), mar = c(1, 2, 1, 1), oma = c(1, 1, 2, 1))
+    hist(mcmc.chains[[1]][, 1], breaks = bins, col = "skyblue", border = "white", 
+         probability = TRUE, xlab = name, main = "")
+    abline(v = colMeans(mcmc.chains[[1]]), col = "red", lty = 2, lwd = 2)
     
-    # Overlay density curves from all chains
+    if (name == "I") {
+      title.label <- "Posterior Distributions for Intransitivity Measure"
+    } else {
+      title.label <- paste0("Posterior Distributions for ", name)
+    }
+    
+    ## Overlay density curves from all chains
     if (num.chains > 1) {
       for (i in 1:num.chains) {
         lines(density(mcmc.chains[[i]][, 1]), col = i, lwd = 2)
@@ -1032,7 +1060,7 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains = NULL,
     } else {
       lines(density(mcmc.chains[[1]][, 1]), col = 1, lwd = 2)
     }
-    mtext(paste("Posterior Distributions for", name), outer = TRUE, cex = 1.5)
+    mtext(title.label, outer = TRUE, cex = 1.5)
   }
 }
 
@@ -1441,7 +1469,7 @@ mcmc.extract <- function(chains = NULL, num.entities = NULL, name = NULL,
   mcmc.chains <- lapply(chains, function(chain) chain[[name]])
   num.chains <- length(mcmc.chains)
   
-  if (name == "Phi") {
+  if (name == "Phi" || name == "C") {
     mcmc.objs <- mcmc.list(lapply(mcmc.chains, as.mcmc))
     
     ## Compute Gelman-Rubin diagnostic (Rhat)
@@ -2545,19 +2573,21 @@ plot.s <- function(mcmc.BBT = NULL, points.ICBT = NULL, mcmc.IBT = NULL, names =
                                   "ICBT" = 18,
                                   "IBT" = 18)) +
     guides(fill = "none") +
-    labs(title = "",
-         y = "score parameters 's'",
-         x = "Teams") +
-    
-    theme_minimal() +
+    labs(
+      title = "Intrinsic Parameters",
+      x = "Teams",
+      y = "",
+      color = "Model"
+    ) +
+    theme_bw() +
     theme(
-      plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
-      axis.text.x = element_text(size = 20, angle = 70, vjust = 1, hjust = 1),
-      axis.title.x = element_text(size = 18),
-      axis.title.y = element_text(size = 18),
+      aspect.ratio = 0.3,
+      plot.title = element_text(size = 30, hjust = 0.5, face = "bold"),
+      axis.text.x = element_text(size = 24, angle = 70, vjust = 1, hjust = 1),
+      axis.title.x = element_text(size = 30),
       legend.position = "bottom",
-      legend.text = element_text(size = 14),
-      legend.title = element_text(size = 16)
+      legend.text = element_text(size = 24),
+      legend.title = element_text(size = 26)
     )
   return(g)
 }
@@ -2671,11 +2701,12 @@ plot.relations <- function(mcmc.IBT = NULL, Types = c("grad", "curl", "M"),
       scale_x_discrete(position = "bottom") +
       scale_y_discrete() +
       
-      theme_minimal() +
+      theme_bw() +
       theme(
-        plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
-        axis.text.x = element_text(angle = 70, vjust = 1, hjust = 1, size = 18),
-        axis.text.y = element_text(size = 10),
+        aspect.ratio = 1,
+        plot.title = element_text(size = 30, hjust = 0.5, face = "bold"),
+        axis.text.x = element_text(angle = 70, vjust = 1, hjust = 1, size = 16),
+        axis.text.y = element_text(size = 12),
         panel.grid = element_blank(),
         legend.position = "bottom",
         legend.text = element_text(size = 16),
@@ -3039,9 +3070,9 @@ plot.reversed_edges <- function(graphs.estimated = NULL, graphs.true = NULL, lay
 
 
 
-### ----------------------------------------###
+###-----------------------------------------###
 ###    Plot Line Graph of MSE / Accuracy    ###
-### ----------------------------------------###
+###-----------------------------------------###
 
 ## INPUT: 
 # results:  A data frame combines 'output$Mean$Metrics1' from run.simulation();
@@ -3064,19 +3095,17 @@ plot.Metrics1 <- function(results = NULL, Types = c("MSE_M", "MSE_grad", "MSE_cu
   
   ## Store each graph object into plot.list
   for (type in Types) {
-    plot_data <- results
-
     # Define title
     title.label <- switch(
       type,
       "MSE_M"    = bquote(MSE[M]),
       "MSE_grad" = bquote(MSE[grad]),
       "MSE_curl" = bquote(MSE[curl]),
-      "Accuracy" = bquote(.(type))
+      "Accuracy" = "Recovery Accuracy"
     )
     
     # Create ggplot object
-    p <- ggplot(plot_data, 
+    p <- ggplot(results, 
                 aes(x = sparsity,
                     y = .data[[type]],
                     color = Model,
@@ -3101,8 +3130,6 @@ plot.Metrics1 <- function(results = NULL, Types = c("MSE_M", "MSE_grad", "MSE_cu
         legend.text = element_text(size = 14),
         legend.title = element_text(size = 16)
       )
-    
-    # Scale y-axis
     plot.list[[type]] <- p
   }
   
@@ -3128,9 +3155,9 @@ plot.Metrics1 <- function(results = NULL, Types = c("MSE_M", "MSE_grad", "MSE_cu
 
 
 
-### --------------------------------------------###
+###---------------------------------------------###
 ###    Plot Line Graph of Recall / Precision    ###
-### --------------------------------------------###
+###---------------------------------------------###
 
 ## INPUT: 
 # results:  A data frame from run.simulation(), e.g., output$Mean$Metrics2:
@@ -3138,49 +3165,188 @@ plot.Metrics1 <- function(results = NULL, Types = c("MSE_M", "MSE_grad", "MSE_cu
 ## OUTPUT:
 # A ggplot object.
 
-plot.Metrics2 <- function(results = NULL) {
+plot.Metrics2 <- function(results = NULL, Types = c("Recall", "Precision", "F1")) {
   ## Preparation
+  results <- results %>% 
+    filter(Model %in% c("IBT", "ICBT"))
+  colors <- c(
+    "IBT"  = "#00BA38",
+    "ICBT" = "#619CFF"
+  )
   estimator <- unique(results$Estimator)
-  data.metrics2 <- results %>%
-    filter(Model %in% c("IBT", "ICBT")) %>%
-    tidyr::pivot_longer(
-      cols = c("Precision", "Recall"),
-      names_to = "Metric",
-      values_to = "Value"
-    )
+  plot.list <- list()
   
-  ## Draw Recall / Precision
-  ggplot(data.metrics2,
-         aes(x = Level,
-             y = Value,
-             color = Model,
-             linetype = Metric,
-             group = interaction(Model, Metric))
-         ) +
-    geom_line(linewidth = 1) +
-    geom_point(size = 3, alpha = 0.9) +
-    scale_linetype_manual(values = c("Precision" = "solid", "Recall" = "dashed")) + 
-    scale_y_continuous(limits = c(0, 1)) +
-    scale_x_continuous(breaks = unique(data.metrics2$Level)) +
+  if (length(Types) == 1) {
+    aspect.ratio <- 0.6
+  } else {
+    aspect.ratio <- 1
+  }
+  
+  ## Store each graph object into plot.list
+  for (type in Types) {
+    # Define title
+    title.label <- switch(
+      type,
+      "Recall"    = "Recall",
+      "Precision" = "Precision",
+      "F1"        = "F1 Score"
+    )
     
-    # Set the label and title
-    labs(
-      title = "Recall & Precision",
-      x = "Level",
-      y = "",
-      color = "Model",
-      linetype = "Metric"
-    ) +
-    theme_bw() +
-    theme(
-      aspect.ratio = 0.6,
-      plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
-      axis.title.x = element_text(size = 16),
-      legend.position = "bottom",
-      legend.key.width = unit(1.5, "cm"),
-      legend.text = element_text(size = 14),
-      legend.title = element_text(size = 16)
+    # Create ggplot object
+    p <- ggplot(results, 
+                aes(x = Level,
+                    y = .data[[type]],
+                    color = Model,
+                    group = Model)) +
+      geom_line(linewidth = 1) +
+      geom_point(size = 3, alpha = 0.9) +
+      scale_x_continuous(breaks = seq(0, 1, 0.1)) +
+      scale_y_continuous(limits = c(0.3, 1), breaks = seq(0, 1, 0.1)) +
+      scale_color_manual(values = colors) +
+      
+      # Set the label and title
+      labs(
+        title = title.label,
+        x = "Level",
+        y = "",
+        color = "Model"
+      ) +
+      theme_bw() +
+      theme(
+        aspect.ratio = aspect.ratio,
+        plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
+        axis.title.x = element_text(size = 16),
+        legend.position = "bottom",
+        legend.key.width = unit(1, "cm"),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16)
       )
+    plot.list[[type]] <- p
+  }
+  
+  ## Combine graphs
+  if (length(plot.list) == 3) {
+    combined <- wrap_plots(plot.list) + 
+      plot_layout(guides = "collect") & 
+      theme(legend.position = 'bottom')
+    print(combined)
+  } else if (length(plot.list) == 1) {
+    print(plot.list[[1]])
+  }
+}
+
+
+
+
+###----------------------------------------###
+###    Plot Histgram of Local Vorticity    ###
+###----------------------------------------###
+
+## INPUT: 
+# means:  A posterior means of local vorticity.
+
+## OUTPUT:
+# Plots the histgram of local vorticity.
+
+plot.vorticity.hist <- function(means = NA) {
+  ## Set up the plotting area
+  par(mfrow = c(1, 1), mar = c(4, 4, 2, 1), oma = c(1, 1, 1, 1))
+  
+  ## Plot Histgram
+  hist(means, 
+       breaks = 50, 
+       col = "gray70", 
+       border = "white",
+       main = "Distribution of Posterior Means of Local Vorticity",
+       xlab = "Posterior Mean of Local Vorticity",
+       ylab = "Frequency",
+       cex.main = 1.5, 
+       cex.lab = 1.2)
+
+  abline(v = 0, col = "red", lwd = 2, lty = 2)
+  
+  ## Set the legend
+  legend("topright", 
+         legend = c("Arbitrage-free", "Triads"),
+         lty = c(2, NA), 
+         lwd = c(2, NA), 
+         pch = c(NA, 15),
+         col = c("red", "gray70"), 
+         bty = "n",
+         cex = 1.1)
+}
+
+
+
+
+###-------------------------------------------###
+###    Plot Forest plot of Local Vorticity    ###
+###-------------------------------------------###
+
+## INPUT: 
+# results:  A list of specific MCMC samples;
+# names:    A character vector representing the triad names;
+# top_k:    A numeric value for the number of top triads to display;
+# hpd:      Logical flag: if TRUE, return the Highest Posterior Density (HPD) interval.
+# level:    The credible interval level (e.g., 0.95);
+
+## OUTPUT:
+# Plots the forest plot of local vorticity.
+
+plot.vorticity.forest <- function(results, names, top_k = 8, hpd = TRUE, level = 0.95) {
+  ## Preparation
+  num.entities <- length(names)
+  num.triplets <- choose(num.entities,3)
+  triad.idx <- combn(num.entities, 3)
+  triad.names <- apply(triad.idx, 2, function(x) {
+    paste(entities.name[x], collapse = "-")
+  })
+  
+  ## Calculate posterior mean and 95% credible intervals for each triad
+  means <- colMeans(results)
+  if (hpd) {
+    mcmc.obj <- coda::as.mcmc(results)
+    hpd.int  <- coda::HPDinterval(mcmc.obj, prob = level)
+    lower <- hpd.int[ , "lower"]
+    upper <- hpd.int[ , "upper"]
+  } else {
+    pr <- c((1-level)/2, 1-(1-level)/2)
+    q  <- apply(results, 2, stats::quantile, probs = pr, names = FALSE)
+    lower <- q[1, ]
+    upper <- q[2, ]
+  }
+
+  ## Organize data for plotting
+  top_k.idx <- order(abs(means), decreasing = TRUE)[1:top_k]
+  data.plot <- data.frame(
+    triad_name = triad.names[top_k.idx],
+    mean = means[top_k.idx],
+    low  = lower[top_k.idx],
+    high = upper[top_k.idx]
+  )
+  data.plot <- data.plot[rev(seq_len(top_k)), ]
+  
+  ## Set up the plotting area
+  par(mfrow = c(1, 1), mar = c(4, 8, 2, 1), oma = c(1, 1, 1, 1))
+  
+  ## Plot top_k local vorticity
+  plot(data.plot$mean, 1:top_k, 
+       pch = 19, col = "#000080",
+       xlim = range(c(data.plot$low, data.plot$high)),
+       yaxt = "n",
+       xlab = "Local Vorticity",
+       ylab = "", 
+       main = "Posterior Estimates of Local Vorticity",
+       cex.main = 1.5,
+       cex.lab  = 1.5)
+  segments(data.plot$low, 1:top_k, data.plot$high, 1:top_k, col = "#000080", lwd = 2)
+  abline(v = 0, col = "red", lty = 2, lwd = 1.5)
+  
+  ## Add triad names to the Y-axis
+  axis(2, at = 1:top_k, labels = data.plot$triad_name, las = 2, cex.axis = 1.2)
+  
+  ## Print significant triads ratio
+  paste("Significant Triads: ", sum(lower > 0 | upper < 0), " / ", num.triplets)
 }
 
 ######################  END Functions for Visualization  #######################

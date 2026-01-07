@@ -47,6 +47,7 @@ Rcpp::List IBT_Gibbs_cpp(int mcmc, int burn, int thin,
                          arma::vec lambda, double tau, arma::vec nu, double xi) 
   {
   // Initial values
+  arma::sp_mat C      = C_ast.t();
   arma::vec Phi       = H * weights;
   arma::vec grad_flow = G * s;
   arma::vec curl_flow = C_ast * Phi;
@@ -68,6 +69,9 @@ Rcpp::List IBT_Gibbs_cpp(int mcmc, int burn, int thin,
   arma::mat grad_pos(mcmc_row, num_pairs);
   arma::mat curl_pos(mcmc_row, num_pairs);
   arma::mat M_pos(mcmc_row, num_pairs);
+  
+  arma::vec I_pos(mcmc_row);
+  arma::mat C_pos(mcmc_row, num_triplets);
   
   double sigma_sq = sigma * sigma;
   double inv_sigma_sq = 1.0 / sigma_sq;
@@ -150,6 +154,12 @@ Rcpp::List IBT_Gibbs_cpp(int mcmc, int burn, int thin,
     curl_flow = C_ast * Phi;
     M_vec = grad_flow + curl_flow;
     
+    // Global Intransitivity Measure and Local Velocity Calculation
+    double curl_norm = arma::dot(curl_flow, curl_flow);
+    double M_norm = arma::dot(M_vec, M_vec);
+    double intransitivity = (M_norm > 0) ? (curl_norm / M_norm) : 0.0;
+    arma::vec vorticity = C * curl_flow;
+    
     // ------------------------  END Updating  ----------------------------------
     if (iter > burn && (iter-burn) % thin == 0) { // Store posterior samples
       s_pos.row(sample_idx)       = s.t();
@@ -163,6 +173,8 @@ Rcpp::List IBT_Gibbs_cpp(int mcmc, int burn, int thin,
       grad_pos.row(sample_idx)    = grad_flow.t();
       curl_pos.row(sample_idx)    = curl_flow.t();
       M_pos.row(sample_idx)       = M_vec.t();
+      I_pos[sample_idx]           = intransitivity;
+      C_pos.row(sample_idx)       = vorticity.t();
       
       sample_idx++;
     }
@@ -179,7 +191,9 @@ Rcpp::List IBT_Gibbs_cpp(int mcmc, int burn, int thin,
                             Rcpp::Named("xi")       = xi_pos,
                             Rcpp::Named("grad")     = grad_pos,
                             Rcpp::Named("curl")     = curl_pos,
-                            Rcpp::Named("M")        = M_pos);
+                            Rcpp::Named("M")        = M_pos,
+                            Rcpp::Named("I")        = I_pos,
+                            Rcpp::Named("C")        = C_pos);
 }
 
 

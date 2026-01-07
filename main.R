@@ -24,7 +24,7 @@ networks.true <- plot.networks(compute.M(X), num.entities = num.entities, compon
                                weight = "prop", layout = "circle", tie_mode = "skip")
 
 ## For Artificial Data:
-num.entities <- 4
+num.entities <- 10
 triplets <- t(combn(1:num.entities, 3))
 num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
 num.free <- choose(num.entities-1,2)
@@ -32,8 +32,8 @@ w.true <- rep(0, num.free)
 # w.true[1] <- 5
 #w.true[6] <- 4
 #w.true[8] <- 6
-w.true <- compute.spPhi.true(num.entities = num.entities, norm = 2.5, seed = 1, 
-                             sparsity.level = 0.5)$weights
+#w.true <- compute.spPhi.true(num.entities = num.entities, norm = 2.5, seed = 1, 
+#                             sparsity.level = 0.5)$weights
 artificial.data <- generate.artificial.data(num.entities = num.entities, s_interval = 0.5, freq.pair = 100, weights = w.true)
 X <- artificial.data$X
 entities.name <- artificial.data$entity.names
@@ -51,8 +51,8 @@ networks.true <- plot.networks(artificial.data$relations, num.entities = num.ent
 num.chains <- 1
 num.iter <- 10000
 num.burn <- num.iter/5
-model <- "ICBT"   # Options: (IBT.R, IBT.cpp, ICBT, BBT.Stan, BBT.cpp, BBT.R)
-param.name <- "curl_re" # Options: (s, sigma, weights, Phi, lambda, tau, nu, xi, grad, curl, M)
+model <- "IBT.cpp"   # Options: (IBT.R, IBT.cpp, ICBT, BBT.Stan, BBT.cpp, BBT.R)
+param.name <- "C" # Options: (s, sigma, weights, Phi, lambda, tau, nu, xi, grad, curl, M)
 
 ## Prior specification
 BBT.priors <- list(s.prior       = rep(0, num.entities), sigma.prior = 2.5)
@@ -82,6 +82,11 @@ plot.ACFs(num.chains, specific.mcmc, num.entities, param.name)        # plot aut
 specifics.estimates <- stats.posteriors(num.chains, specific.mcmc, num.entities, param.name,
                                         CI = TRUE, level = 0.95, hpd = TRUE, decimal = 3)  # compute the mean, median and sds
 
+## Plot Global Intransitivity Measure and Local Vorticity
+plot.vorticity.hist(specifics.estimates$mean)
+plot.vorticity.forest(results = specific.mcmc[[1]], names = entities.name, top_k = 10)
+
+
 ## Draw network and check differences
 statistic <- "mean" # Options ("mean", "median")
 components <- if(model=="IBT.R" || model=="IBT.cpp") c("grad", "curl", "M") else c("grad", "M")
@@ -98,7 +103,6 @@ network.estimates <- plot.networks(relations.estimates, num.entities = num.entit
                                    layout.coords = networks.true$layout,
                                    weight = "prop", layout = "circle", tie_mode = "skip")
 plot.reversed_edges(network.estimates$graphs, networks.true$graphs, networks.true$layout)
-
 
 
 ## Plot parameters 's'
@@ -131,7 +135,7 @@ mcmc.IBT <- run.MCMCs(model = "IBT.cpp", num.chains = 1, name = "s", num.entitie
 
 plot.s(mcmc.BBT = mcmc.BBT$name.mcmc[[1]], points.ICBT = points.ICBT, 
        mcmc.IBT = mcmc.IBT$name.mcmc[[1]], names = entities.name, order = "desc")
-plot.relations(mcmc.IBT = mcmc.IBT, Types = c("grad", "curl", "M"), 
+plot.relations(mcmc.IBT = mcmc.IBT$all.mcmc[[1]], Types = c("grad", "curl", "M"), 
                num.entities = num.entities, names = entities.name, order = "desc")
 
 ##########################  END MCMC & Visualization  ##########################
@@ -153,7 +157,7 @@ mcmc.params <- list(mcmc   = 10000,
                     levels = c(seq(0.1, 0.9, by = 0.1) , 0.95),
                     hpd    = TRUE)
 data.params <- list(s.sd = 1,
-                    freq.range = c(100, 100),
+                    freq.range = c(5, 100),
                     w.params = list(norm = 2, sparsity = 0))
 IBT.params <- list(s.prior       = rep(0, num.entities),
                    sigma.prior   = 2.5,
@@ -166,7 +170,7 @@ ICBT.params <- list(alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
                     gamma_A = 1, lambda_A = 10, nu_A = 1)
 
 success.flag <- list()
-for (i in 0:10) {
+for (i in 1:10) {
   if (i != 0 && i != 10) {
     setting <- "sparse"
     data.params$w.params$sparsity <- i/10
@@ -189,16 +193,16 @@ for (i in 0:10) {
   success.flag[i] <- store.csv(results$All, num.entities = num.entities, file.name = "results")
 }
 
-df <- read.csv(file.path(getwd(), paste0("N = ", num.entities, "_freq = 5-100_ns/metrics1_", num.entities, ".csv")))
-tmp <- df[df$Estimator == "Mean", ]
+df <- read.csv(file.path(getwd(), paste0("N = ", num.entities, "_freq = 100_nsF1/metrics1_", num.entities, ".csv"))) # paste0("results/metrics1_", num.entities, ".csv")))
+tmp <- df[df$Estimator == "Mean" & df$sparsity == 1, ]
 plot.Metrics1(tmp, Types = c("MSE_M", "MSE_grad", "MSE_curl"))
 plot.Metrics1(tmp, Types = c("Accuracy"))
 
-df <- read.csv(file.path(getwd(), paste0("N = ", num.entities, "_freq = 5-100_ns/metrics2_", num.entities, ".csv")))
+df <- read.csv(file.path(getwd(), paste0("N = ", num.entities, "_freq = 100_nsF1/metrics2_", num.entities, ".csv"))) # paste0("results/metrics2_", num.entities, ".csv")))
 tmp <- df[df$Estimator == "Mean" & df$sparsity == 0.9, ]
-plot.Metrics2(tmp)
+plot.Metrics2(tmp, Types = c("Recall", "Precision", "F1"))
 
-df <- read.csv(file.path(getwd(), paste0("N = ", num.entities, "_freq = 5-100_ns/CP_", num.entities, ".csv")))
-df[df$Model == "IBT" & df$Estimator == "Mean" & df$sparsity == 0.9, ]
+df <- read.csv(file.path(getwd(), paste0("N = ", num.entities, "_freq = 100_nsF1/CP_", num.entities, ".csv"))) # paste0("results/CP_", num.entities, ".csv")))
+df[df$Model == "BBT" & df$Estimator == "Mean" & df$sparsity == 1, ]
 
 ##############################  END Simulations  ###############################
