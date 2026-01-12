@@ -1,16 +1,18 @@
 #
 # Sourcing this R file (> source("functions.R")) results in the creation 
-# of the following 15 functions:
-#
+# of the following 31 functions:
+# 
 # - For Constructing Each Model:
-#     IBT.cpp, IBT.R, BBT.cpp, BBT.R, BBT.Stan, BT.freq;
+#     BIBT.cpp, BBT.cpp, IBT.R, BBT.R, BBT.Stan, ICBT.RJMCMC, BT.freq;
 # - For Running MCMC:
 #     run.MCMCs, plot.MCMCs, plot.posteriors, plot.ACFs, stats.posteriors, mcmc.extract, build.hodge_operators;
 # - For Simulations:
-#     compute.Phi.true, compute.spPhi.true, compute.relations.true, compute.M, generate.artificial.data,
-#     generate.simulation.datasets, 
-# - For Visualization:
-#     plot.networks, plot.reversed_edges.
+#     compute.Phi.true, compute.spPhi.true, compute.relations.true, compute.M, 
+#     generate.artificial.data, generate.simulation.datasets, compute.metrics, 
+#     run.simulation, store.csv;
+# - For Visualization
+#     plot.s, plot.relations, plot.networks, plot.reversed_edges, plot.Metrics1, plot.Metrics2, 
+#     plot.vorticity.hist, plot.vorticity.forest.
 #
 ######################  BEGIN Functions for each models  #######################
 
