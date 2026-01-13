@@ -6,6 +6,9 @@
 This repository provides an implementation of the **Bayesian Intransitive Bradley-Terry (BIBT)** model. 
 The BIBT model is a principled Bayesian framework designed to disentangle transitive and intransitive structures in pairwise comparison data.
 
+This repository accompanies the following paper:
+> Okahara, H., Nakagawa, T., and Sugasawa, S. (2026). *The Bayesian Intransitive Bradley-Terry Model via Combinatorial Hodge Theory*. arXiv:2601.07158.
+
 ## OVERVIEW
 The BIBT model extends the classical Bradley-Terry framework by embedding **combinatorial Hodge theory**. 
 It decomposes paired relationships into:
@@ -26,6 +29,3 @@ It decomposes paired relationships into:
 1. Ensure you have a C++ compiler installed for `Rcpp` compatibility.
 2. Run `libraries.R` to set up the environment.
 3. Execute `main.R` to run a demonstration using the provided MLB or synthetic datasets.
-
-## Citation
-If you use this code or the BIBT model in your research, please cite our paper.
