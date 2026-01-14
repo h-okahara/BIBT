@@ -1,24 +1,22 @@
 #
 # Sourcing this R file (> source("functions.R")) results in the creation 
-# of the following 31 functions:
-# 
+# of the following 15 functions:
+#
 # - For Constructing Each Model:
-#     BIBT.cpp, BBT.cpp, IBT.R, BBT.R, BBT.Stan, ICBT.RJMCMC, BT.freq;
+#     BIBT.cpp, BIBT.R, BBT.cpp, BBT.R, BBT.Stan, BT.freq;
 # - For Running MCMC:
 #     run.MCMCs, plot.MCMCs, plot.posteriors, plot.ACFs, stats.posteriors, mcmc.extract, build.hodge_operators;
 # - For Simulations:
-#     compute.Phi.true, compute.spPhi.true, compute.relations.true, compute.M, 
-#     generate.artificial.data, generate.simulation.datasets, compute.metrics, 
-#     run.simulation, store.csv;
-# - For Visualization
-#     plot.s, plot.relations, plot.networks, plot.reversed_edges, plot.Metrics1, plot.Metrics2, 
-#     plot.vorticity.hist, plot.vorticity.forest.
+#     compute.Phi.true, compute.spPhi.true, compute.relations.true, compute.M, generate.artificial.data,
+#     generate.simulation.datasets, 
+# - For Visualization:
+#     plot.networks, plot.reversed_edges.
 #
 ######################  BEGIN Functions for each models  #######################
 
-###-----------------------------------------------------###
-###    Intransitive Bradley-Terry (IBT) Model in C++    ###
-###-----------------------------------------------------###
+###---------------------------------------------------------------###
+###    Bayesian Intransitive Bradley-Terry (BIBT) Model in C++    ###
+###---------------------------------------------------------------###
 
 ## INPUT:
 # X:              An N×N matrix where the (i,j) entry indicates that player i defeats player j;
@@ -37,9 +35,9 @@
 ## OUTPUT:
 # A list of MCMC samples for the parameters: omega, s, Phi, lambda, tau, nu, xi, grad, curl, M.
 
-IBT.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
-                    s.prior = NULL, sigma.prior = NULL, weights.prior = NULL,
-                    lambda.prior = NULL, tau.prior = NULL, nu.prior = NULL, xi.prior = NULL) 
+BIBT.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
+                     s.prior = NULL, sigma.prior = NULL, weights.prior = NULL,
+                     lambda.prior = NULL, tau.prior = NULL, nu.prior = NULL, xi.prior = NULL) 
   {
   ## Preparation
   entity.name <- unique(c(X$player1, X$player2))
@@ -71,12 +69,12 @@ IBT.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
   xi      <- if(is.null(xi.prior)) 1 else xi.prior
   
   ## MCMC Sampling using C++
-  result.cpp <- IBT_Gibbs_cpp(mcmc = mcmc, burn = burn, thin = thin, 
-                              n_ij = X$n_ij, kappa = kappa, G = G, C_ast = C.ast, H = H, 
-                              D_ast = as.matrix(D.ast), D_ast_t = as.matrix(D.ast_t), 
-                              num_entities = N, num_pairs = num.pairs, num_triplets = num.triplets, num_free = num.free, 
-                              s = s, sigma = sigma, weights = weights,
-                              lambda = lambda, tau = tau, nu = nu, xi = xi)
+  result.cpp <- BIBT_Gibbs_cpp(mcmc = mcmc, burn = burn, thin = thin, 
+                               n_ij = X$n_ij, kappa = kappa, G = G, C_ast = C.ast, H = H, 
+                               D_ast = as.matrix(D.ast), D_ast_t = as.matrix(D.ast_t), 
+                               num_entities = N, num_pairs = num.pairs, num_triplets = num.triplets, num_free = num.free, 
+                               s = s, sigma = sigma, weights = weights,
+                               lambda = lambda, tau = tau, nu = nu, xi = xi)
   
   list(s       = result.cpp$s, 
        sigma   = result.cpp$sigma,
@@ -143,9 +141,9 @@ BBT.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
  
 
 
-###---------------------------------------------------###
-###    Intransitive Bradley-Terry (IBT) Model in R    ###
-###---------------------------------------------------###
+###-------------------------------------------------------------###
+###    Bayesian Intransitive Bradley-Terry (BIBT) Model in R    ###
+###-------------------------------------------------------------###
 
 ## INPUT:
 # X:              An N×N matrix where the (i,j) entry indicates that player i defeats player j;
@@ -164,10 +162,10 @@ BBT.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
 ## OUTPUT:
 # A list of MCMC samples for the parameters: omega, s, w, Phi, lambda, tau, nu, xi, grad, curl, M.
 
-IBT.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
-                  s.prior = NULL, sigma.prior = NULL, weights.prior = NULL,
-                  lambda.prior = NULL, tau.prior = NULL, 
-                  nu.prior = NULL, xi.prior = NULL) 
+BIBT.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
+                   s.prior = NULL, sigma.prior = NULL, weights.prior = NULL,
+                   lambda.prior = NULL, tau.prior = NULL, 
+                   nu.prior = NULL, xi.prior = NULL) 
   {
   ## Preparation
   entity.name <- unique(c(X$player1, X$player2))
@@ -672,7 +670,7 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE,
 
 ## INPUT:
 # model:          A character vector specifying which model to run MCMC.
-#                 Defaults: c("IBT.cpp", "IBT.R", "BBT.cpp", "BBT.R", "BBT.Stan");
+#                 Defaults: c("BIBT.cpp", "BIBT.R", "BBT.cpp", "BBT.R", "BBT.Stan");
 # num.chains:     Number of independent MCMC chains to run;
 # num.entities:   Number of entities (e.g., items and players).
 # name:           A string representing the name of parameters;
@@ -695,42 +693,42 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE,
 ## OUTPUT:
 # A list of MCMC draws from multiple chains.
 
-run.MCMCs <- function(model = c("IBT.cpp", "IBT.R", "ICBT", "BBT.cpp", "BBT.R", "BBT.Stan"), 
+run.MCMCs <- function(model = c("BIBT.cpp", "BIBT.R", "ICBT", "BBT.cpp", "BBT.R", "BBT.Stan"), 
                       num.chains = 1, num.entities = NULL, name = NULL, 
                       MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
                       X, mcmc = 10000, burn = 2000, thin = 1, seed = 73,
-                      IBT.params = NULL, ICBT.params = NULL, BBT.params = NULL)
+                      BIBT.params = NULL, ICBT.params = NULL, BBT.params = NULL)
   {
   start.time <- Sys.time()
   
-  if(!model %in% c("IBT.cpp", "IBT.R", "ICBT", "BBT.cpp", "BBT.R", "BBT.Stan")) {
-    stop(paste(model, "must be in (IBT.cpp, IBT.R, ICBT, BBT.cpp, BBT.R, BBT.Stan)."))
+  if(!model %in% c("BIBT.cpp", "BIBT.R", "ICBT", "BBT.cpp", "BBT.R", "BBT.Stan")) {
+    stop(paste(model, "must be in (BIBT.cpp, BIBT.R, ICBT, BBT.cpp, BBT.R, BBT.Stan)."))
   }
   
   ## Run multiple MCMC chains for each model
-  if (model == "IBT.cpp") {
+  if (model == "BIBT.cpp") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
-      IBT.cpp(X, mcmc = mcmc, burn = burn, thin = thin, operators = NULL,
-              s.prior       = IBT.params$s.prior, 
-              sigma.prior   = IBT.params$sigma.prior,
-              weights.prior = IBT.params$weights.prior, 
-              tau.prior     = IBT.params$tau.prior, 
-              lambda.prior  = IBT.params$lambda.prior, 
-              nu.prior      = IBT.params$nu.prior, 
-              xi.prior      = IBT.params$xi.prior)
+      BIBT.cpp(X, mcmc = mcmc, burn = burn, thin = thin, operators = NULL,
+               s.prior       = BIBT.params$s.prior, 
+               sigma.prior   = BIBT.params$sigma.prior,
+               weights.prior = BIBT.params$weights.prior, 
+               tau.prior     = BIBT.params$tau.prior, 
+               lambda.prior  = BIBT.params$lambda.prior, 
+               nu.prior      = BIBT.params$nu.prior, 
+               xi.prior      = BIBT.params$xi.prior)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
-  } else if (model == "IBT.R") {
+  } else if (model == "BIBT.R") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
       set.seed(seed + chain.id)
-      IBT.R(X, mcmc = mcmc, burn = burn, thin = thin, operators = NULL,
-            s.prior       = IBT.params$s.prior, 
-            sigma.prior   = IBT.params$sigma.prior, 
-            weights.prior = IBT.params$weights.prior, 
-            tau.prior     = IBT.params$tau.prior, 
-            lambda.prior  = IBT.params$lambda.prior, 
-            nu.prior      = IBT.params$nu.prior, 
-            xi.prior      = IBT.params$xi.prior)
+      BIBT.R(X, mcmc = mcmc, burn = burn, thin = thin, operators = NULL,
+             s.prior       = BIBT.params$s.prior, 
+             sigma.prior   = BIBT.params$sigma.prior, 
+             weights.prior = BIBT.params$weights.prior, 
+             tau.prior     = BIBT.params$tau.prior, 
+             lambda.prior  = BIBT.params$lambda.prior, 
+             nu.prior      = BIBT.params$nu.prior, 
+             xi.prior      = BIBT.params$xi.prior)
     }, mc.cores = min(num.chains, parallel::detectCores()-1))
   } else if(model == "ICBT") {
     chains <- parallel::mclapply(1:num.chains, function(chain.id) {
@@ -1980,7 +1978,7 @@ generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.ent
 
 ## INPUT:
 # model:          A character vector specifying which model to run MCMC;
-#                 Defaults: c("IBT.cpp", "BBT.Stan");
+#                 Defaults: c("BIBT.cpp", "BBT.Stan");
 # mcmc.chain:     A list of specific MCMC samples;
 # relations.true: A list or data frame containing the true parameter vectors (e.g., M, grad, curl).
 # time:           A numeric;
@@ -1990,7 +1988,7 @@ generate.simulation.datasets <- function(num.cores = 1, num.replica = 1, num.ent
 ## OUTPUT:
 # A data frame storing metrics (MSE, CP, Accuracy, Recall, Precision) for each model
 
-compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL, 
+compute.metrics <- function(model = c("BIBT", "ICBT", "BBT"), mcmc.chain = NULL, 
                             relations.true = NULL, time = NULL, 
                             levels = 0.95, hpd = TRUE)
   {
@@ -2008,7 +2006,7 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
   MSE_M.median    <- mean((M_hat.median - M_true)^2)
   Accuracy.median <- mean(sign(M_hat.median * M_true) > 0)
   
-  if (model == "IBT" || model == "BBT") {
+  if (model == "BIBT" || model == "BBT") {
     grad_hat.mean <- apply(mcmc.chain$grad, 2, mean)
     MSE_grad.mean <- mean((grad_hat.mean - grad_true)^2)
     
@@ -2021,8 +2019,8 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
     MSE_grad.mean <- MSE_grad.median <- MSE_grad
   }
   
-  ## Intrinsic Metrics for the IBT model
-  if (model == "IBT") {
+  ## Intrinsic Metrics for the BIBT model
+  if (model == "BIBT") {
     curl_hat.mean   <- apply(mcmc.chain$curl, 2, mean)
     MSE_curl.mean   <- mean((curl_hat.mean - curl_true)^2)
     
@@ -2045,7 +2043,7 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
   if (hpd) { 
     mcmc.obj_M    <- coda::as.mcmc(mcmc.chain$M)
     if (!model == "ICBT") mcmc.obj_grad <- coda::as.mcmc(mcmc.chain$grad)
-    if (model == "IBT") mcmc.obj_curl <- coda::as.mcmc(mcmc.chain$curl)
+    if (model == "BIBT") mcmc.obj_curl <- coda::as.mcmc(mcmc.chain$curl)
     if (model == "ICBT") mcmc.obj_curl <- coda::as.mcmc(mcmc.chain$curl_re)
   }
   
@@ -2065,7 +2063,7 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
     }
     CP_M.flag    <- (M_true >= M_hat.lower) & (M_true <= M_hat.upper)
     
-    if (model == "IBT" || model == "BBT") {
+    if (model == "BIBT" || model == "BBT") {
       if (hpd) {
         hpd.int_grad <- coda::HPDinterval(mcmc.obj_grad, prob = level)
         grad_hat.lower <- hpd.int_grad[, "lower"]
@@ -2080,13 +2078,13 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
       CP_grad.flag <- rep(NA, length(M_true))
     }
     
-    if (model == "IBT" || model == "ICBT") {
+    if (model == "BIBT" || model == "ICBT") {
       if (hpd) {
         hpd.int_curl   <- coda::HPDinterval(mcmc.obj_curl, prob = level)
         curl_hat.lower <- hpd.int_curl[, "lower"]
         curl_hat.upper <- hpd.int_curl[, "upper"]
       } else {
-        if (model == "IBT")  CI_curl <- apply(mcmc.chain$curl, 2, quantile, probs = pr)
+        if (model == "BIBT")  CI_curl <- apply(mcmc.chain$curl, 2, quantile, probs = pr)
         if (model == "ICBT") CI_curl <- apply(mcmc.chain$curl_re, 2, quantile, probs = pr)
         curl_hat.lower <- CI_curl[1, ]
         curl_hat.upper <- CI_curl[2, ]
@@ -2182,7 +2180,7 @@ compute.metrics <- function(model = c("IBT", "ICBT", "BBT"), mcmc.chain = NULL,
 run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL, 
                            setting = c("transitive", "sparse", "dense"), decimal = 4,
                            mcmc.params = NULL, data.params = NULL,
-                           IBT.params = NULL, ICBT.params = NULL, seed = 73)
+                           BIBT.params = NULL, ICBT.params = NULL, seed = 73)
   {
   ## Preparation
   run.time <- Sys.time()
@@ -2221,20 +2219,20 @@ run.simulation <- function(num.cores = 1, num.replica = 1, num.entities = NULL,
     relations.true <- data_r$relations
     metrics.list <- list()
     
-    # Evaluate IBT.cpp
+    # Evaluate BIBT.cpp
     start.time <- Sys.time()
-    results.IBT <- IBT.cpp(X, mcmc = mcmc, burn = burn, thin = thin, operators = operators,
-                           s.prior = IBT.params$s.prior,
-                           sigma.prior = IBT.params$sigma.prior, 
-                           weights.prior = IBT.params$weights.prior, 
-                           lambda.prior = IBT.params$lambda.prior, 
-                           tau.prior = IBT.params$tau.prior, 
-                           nu.prior = IBT.params$nu.prior, 
-                           xi.prior = IBT.params$xi.prior)
+    results.BIBT <- BIBT.cpp(X, mcmc = mcmc, burn = burn, thin = thin, operators = operators,
+                             s.prior = BIBT.params$s.prior,
+                             sigma.prior = BIBT.params$sigma.prior, 
+                             weights.prior = BIBT.params$weights.prior, 
+                             lambda.prior = BIBT.params$lambda.prior, 
+                             tau.prior = BIBT.params$tau.prior, 
+                             nu.prior = BIBT.params$nu.prior, 
+                             xi.prior = BIBT.params$xi.prior)
     time.sec <- difftime(Sys.time(), start.time, units = "sec")
-    metrics.list$IBT <- compute.metrics(model = "IBT", results.IBT,
-                                        relations.true, as.numeric(time.sec),
-                                        levels = levels, hpd = TRUE)
+    metrics.list$BIBT <- compute.metrics(model = "BIBT", results.BIBT,
+                                         relations.true, as.numeric(time.sec),
+                                         levels = levels, hpd = TRUE)
     
     # Evaluate ICBT
     tryCatch({
@@ -2479,43 +2477,43 @@ store.csv <- function(results = NULL, num.entities = NULL, file.name = "results"
 ## INPUT:
 # mcmc.BBT:     A matrix of MCMC samples 's' of the BBT model;
 # points.ICBT:  A vector of point estimates 's' of the BT model;
-# mcmc.IBT:     A matrix of MCMC samples 's' of the IBT model;
+# mcmc.BIBT:    A matrix of MCMC samples 's' of the BIBT model;
 # names:        Optional vector of entity names. If NULL, numeric labels are used.
 # order:        Ordering flag to change the order of entities. (e.g., "asc" and "desc")
 
 ## OUTPUT:
 # Creates a grouped violin plot for each model.
 
-plot.s <- function(mcmc.BBT = NULL, points.ICBT = NULL, mcmc.IBT = NULL, names = NULL, order = NULL) {
+plot.s <- function(mcmc.BBT = NULL, points.ICBT = NULL, mcmc.BIBT = NULL, names = NULL, order = NULL) {
   ## Preparation
   num.entities <- ncol(mcmc.BBT)
   if(is.null(names)) {
     names <- as.character(paste("Entity", 1:num.entities))
   }
-  BBT.df <- as.data.frame(mcmc.BBT)
-  IBT.df <- as.data.frame(mcmc.IBT)
-  colnames(BBT.df) <- colnames(IBT.df) <- names
+  BBT.df  <- as.data.frame(mcmc.BBT)
+  BIBT.df <- as.data.frame(mcmc.BIBT)
+  colnames(BBT.df) <- colnames(BIBT.df) <- names
   
   ## Determine Sort Order
   if (!is.null(order)) {
-    means.IBT <- colMeans(IBT.df, na.rm = TRUE)
+    means.BIBT <- colMeans(BIBT.df, na.rm = TRUE)
     
     if (order == "desc") {
-      names.sorted <- names[order(means.IBT, decreasing = TRUE)]
+      names.sorted <- names[order(means.BIBT, decreasing = TRUE)]
     } else if (order == "asc") {
-      names.sorted <- names[order(means.IBT, decreasing = FALSE)]
+      names.sorted <- names[order(means.BIBT, decreasing = FALSE)]
     }
   } else {
     names.sorted <- names
   }
   
   ## Calculate Posterior Means
-  means.BBT <- colMeans(BBT.df, na.rm = TRUE)
-  means.IBT <- colMeans(IBT.df, na.rm = TRUE)
+  means.BBT  <- colMeans(BBT.df, na.rm = TRUE)
+  means.BIBT <- colMeans(BIBT.df, na.rm = TRUE)
   means.df <- data.frame(
     Team = rep(names, 2),
-    Value = c(means.BBT, means.IBT),
-    Model = rep(c("BBT", "IBT"), each = length(names))
+    Value = c(means.BBT, means.BIBT),
+    Model = rep(c("BBT", "BIBT"), each = length(names))
   )
   
   ## Reshape Data to Long Format
@@ -2524,10 +2522,10 @@ plot.s <- function(mcmc.BBT = NULL, points.ICBT = NULL, mcmc.IBT = NULL, names =
     pivot_longer(cols = everything(), names_to = "Team", values_to = "Value") %>%
     mutate(Model = "BBT")
   
-  # IBT model
-  IBT.df_long <- IBT.df %>%
+  # BIBT model
+  BIBT.df_long <- BIBT.df %>%
     pivot_longer(cols = everything(), names_to = "Team", values_to = "Value") %>%
-    mutate(Model = "IBT")
+    mutate(Model = "BIBT")
   
   # ICBT model
   ICBT.df_long <- data.frame(
@@ -2537,7 +2535,7 @@ plot.s <- function(mcmc.BBT = NULL, points.ICBT = NULL, mcmc.IBT = NULL, names =
   )
 
   # Bind MCMC data
-  mcmc.df <- bind_rows(BBT.df_long, IBT.df_long)
+  mcmc.df <- bind_rows(BBT.df_long, BIBT.df_long)
   
   ## Apply Factor Levels
   mcmc.df$Team <- factor(mcmc.df$Team, levels = names.sorted)
@@ -2561,22 +2559,22 @@ plot.s <- function(mcmc.BBT = NULL, points.ICBT = NULL, mcmc.IBT = NULL, names =
                size = 3, stroke = 1.2) +
 
     scale_color_manual(name = "Model",
-                       values = c("BBT" = "#0072B2", 
+                       values = c("BBT"  = "#0072B2", 
                                   "ICBT" = "red",
-                                  "IBT" = "#E69F00")) +
+                                  "BIBT" = "#E69F00")) +
 
     scale_fill_manual(name = "Model",
-                      values = c("BBT" = "#0072B2", 
+                      values = c("BBT"  = "#0072B2", 
                                  "ICBT" = NA, 
-                                 "IBT" = "#E69F00")) +
+                                 "BIBT" = "#E69F00")) +
 
     scale_shape_manual(name = "Model",
-                       values = c("BBT" = 18, 
+                       values = c("BBT"  = 18, 
                                   "ICBT" = 18,
-                                  "IBT" = 18)) +
+                                  "BIBT" = 18)) +
     guides(fill = "none") +
     labs(
-      title = "Intrinsic Parameters",
+      title = "Score Parameters",
       x = "Teams",
       y = "",
       color = "Model"
@@ -2584,12 +2582,13 @@ plot.s <- function(mcmc.BBT = NULL, points.ICBT = NULL, mcmc.IBT = NULL, names =
     theme_bw() +
     theme(
       aspect.ratio = 0.3,
-      plot.title = element_text(size = 30, hjust = 0.5, face = "bold"),
-      axis.text.x = element_text(size = 24, angle = 70, vjust = 1, hjust = 1),
-      axis.title.x = element_text(size = 30),
+      plot.title = element_text(size = 24, hjust = 0.5, face = "bold"),
+      axis.text.x = element_text(angle = 60, vjust = 1, hjust = 1, size = 14),
+      axis.title.x = element_text(size = 16),
+      axis.text.y = element_text(size = 12),
       legend.position = "bottom",
-      legend.text = element_text(size = 24),
-      legend.title = element_text(size = 26)
+      legend.text = element_text(size = 14),
+      legend.title = element_text(size = 16)
     )
   return(g)
 }
@@ -2602,7 +2601,7 @@ plot.s <- function(mcmc.BBT = NULL, points.ICBT = NULL, mcmc.IBT = NULL, names =
 ###-----------------------------------###
 
 ## INPUT:
-# mcmc.IBT:     A matrix of MCMC samples 'curl' of the IBT model;
+# mcmc.BIBT:    A matrix of MCMC samples 'curl' of the BIBT model;
 # num.entities: Number of entities (e.g., items and players).
 # names:        Optional vector of entity names. If NULL, numeric labels are used.
 # order:        Ordering flag to change the order of entities. (e.g., "asc" and "desc")
@@ -2610,7 +2609,7 @@ plot.s <- function(mcmc.BBT = NULL, points.ICBT = NULL, mcmc.IBT = NULL, names =
 ## OUTPUT:
 # Creates a heatmap of the curl parameter.
 
-plot.relations <- function(mcmc.IBT = NULL, Types = c("grad", "curl", "M"), 
+plot.relations <- function(mcmc.BIBT = NULL, Types = c("grad", "curl", "M"), 
                            num.entities = NULL, names = NULL, order = NULL) 
   {
   ## Preparation
@@ -2619,14 +2618,14 @@ plot.relations <- function(mcmc.IBT = NULL, Types = c("grad", "curl", "M"),
   if(is.null(names)) {
     names <- as.character(paste("Entity", 1:num.entities))
   }
-  s_IBT <- as.data.frame(mcmc.IBT[["s"]])
-  means.s_IBT <- colMeans(s_IBT, na.rm = TRUE)
+  s_BIBT <- as.data.frame(mcmc.BIBT[["s"]])
+  means.s_BIBT <- colMeans(s_BIBT, na.rm = TRUE)
   
   ## Compute Scale (min, max)
   values_all <- c()
   for (type in Types) {
-    if (!is.null(mcmc.IBT[[type]])) {
-      vals <- colMeans(mcmc.IBT[[type]], na.rm = TRUE)
+    if (!is.null(mcmc.BIBT[[type]])) {
+      vals <- colMeans(mcmc.BIBT[[type]], na.rm = TRUE)
       values_all <- c(values_all, vals)
     }
   }
@@ -2636,7 +2635,7 @@ plot.relations <- function(mcmc.IBT = NULL, Types = c("grad", "curl", "M"),
   ## Store each graph object into plot.list
   for (type in Types) {
     # Reconstruct Skew-Symmetric Matrix
-    type.means <- colMeans(mcmc.IBT[[type]], na.rm = TRUE)
+    type.means <- colMeans(mcmc.BIBT[[type]], na.rm = TRUE)
     type.mat <- matrix(0, num.entities, num.entities)
     type.mat[upper.tri(type.mat, diag = FALSE)] <- type.means
     type.mat <- type.mat - t(type.mat)
@@ -2653,9 +2652,9 @@ plot.relations <- function(mcmc.IBT = NULL, Types = c("grad", "curl", "M"),
     ## Determine Sort Order
     if (!is.null(order)) {
       if (order == "desc") {
-        ord.idx <- order(means.s_IBT, decreasing = TRUE)
+        ord.idx <- order(means.s_BIBT, decreasing = TRUE)
       } else if (order == "asc") {
-        ord.idx <- order(means.s_IBT, decreasing = FALSE)
+        ord.idx <- order(means.s_BIBT, decreasing = FALSE)
       }
       type.mat <- type.mat[ord.idx, ord.idx]
       names.sorted <- rownames(type.mat)
@@ -2692,8 +2691,8 @@ plot.relations <- function(mcmc.IBT = NULL, Types = c("grad", "curl", "M"),
       coord_fixed() +
       guides(
         fill = guide_colorbar(
-          barwidth = unit(5, "cm"),
-          barheight = unit(1, "cm"),
+          barwidth = unit(4, "cm"),
+          barheight = unit(0.5, "cm"),
           title.position = "left",
           label.position = "bottom"
         )
@@ -2706,13 +2705,13 @@ plot.relations <- function(mcmc.IBT = NULL, Types = c("grad", "curl", "M"),
       theme_bw() +
       theme(
         aspect.ratio = 1,
-        plot.title = element_text(size = 30, hjust = 0.5, face = "bold"),
-        axis.text.x = element_text(angle = 70, vjust = 1, hjust = 1, size = 16),
+        plot.title = element_text(size = 24, hjust = 0.5, face = "bold"),
+        axis.text.x = element_text(angle = 70, vjust = 1, hjust = 1, size = 13),
         axis.text.y = element_text(size = 12),
         panel.grid = element_blank(),
         legend.position = "bottom",
-        legend.text = element_text(size = 16),
-        legend.title = element_text(size = 18, vjust = 0.8)
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 14, vjust = 0.8)
       )
     
     plot.list[[type]] <- p
@@ -3090,7 +3089,7 @@ plot.Metrics1 <- function(results = NULL, Types = c("MSE_M", "MSE_grad", "MSE_cu
   plot.list <- list()
   
   if (length(Types) == 1) {
-    aspect.ratio <- 0.6
+    aspect.ratio <- 0.5
   } else {
     aspect.ratio <- 1
   }
@@ -3170,9 +3169,9 @@ plot.Metrics1 <- function(results = NULL, Types = c("MSE_M", "MSE_grad", "MSE_cu
 plot.Metrics2 <- function(results = NULL, Types = c("Recall", "Precision", "F1")) {
   ## Preparation
   results <- results %>% 
-    filter(Model %in% c("IBT", "ICBT"))
+    filter(Model %in% c("BIBT", "ICBT"))
   colors <- c(
-    "IBT"  = "#00BA38",
+    "BIBT" = "#00BA38",
     "ICBT" = "#619CFF"
   )
   estimator <- unique(results$Estimator)
