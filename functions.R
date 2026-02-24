@@ -36,7 +36,7 @@
 # xi.prior:       A scalar representing the scalar of tau.prior.
 
 ## OUTPUT:
-# A list of MCMC samples for the parameters: omega, s, Phi, lambda, tau, nu, xi, grad, curl, M.
+# A list of MCMC samples for the parameters: omega, s, Phi, lambda, tau, nu, xi, grad, curl, M, I, C.
 
 BIBT.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
                      s.prior = NULL, sigma.prior = NULL, weights.prior = NULL,
@@ -163,7 +163,7 @@ BBT.cpp <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
 # xi.prior:       A scalar representing the scalar of tau.prior.
 
 ## OUTPUT:
-# A list of MCMC samples for the parameters: omega, s, w, Phi, lambda, tau, nu, xi, grad, curl, M.
+# A list of MCMC samples for the parameters: omega, s, w, Phi, lambda, tau, nu, xi, grad, curl, M, I, C.
 
 BIBT.R <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL,
                    s.prior = NULL, sigma.prior = NULL, weights.prior = NULL,
@@ -803,7 +803,7 @@ run.MCMCs <- function(model = c("BIBT.cpp", "BIBT.R", "ICBT", "BBT.cpp", "BBT.R"
 # Overlayed trace plots (sample paths) for each parameter.
 
 plot.MCMCs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL,  name = NULL) {
-  if (name == "Phi") {
+  if (name == "Phi" || name == "C") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.triplets <- dim(mcmc.chains[[1]])[2]
     triplets <- t(combn(1:num.entities, 3))
@@ -931,7 +931,7 @@ plot.MCMCs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, 
 
 plot.posteriors <- function(num.chains = 1, mcmc.chains = NULL, 
                             num.entities = NULL, name = NULL, bins = 30) {
-  if (name == "Phi") {
+  if (name == "Phi" || name == "C") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.triplets <- dim(mcmc.chains[[1]])[2]
     triplets <- t(combn(1:num.entities, 3))
@@ -1084,7 +1084,7 @@ plot.posteriors <- function(num.chains = 1, mcmc.chains = NULL,
 # Plots the autocorrelation function (ACF) for the given MCMC samples, overlaying results from all chains.
 
 plot.ACFs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, name = NULL) {
-  if (name == "Phi") {
+  if (name == "Phi" || name == "C") {
     mcmc <- dim(mcmc.chains[[1]])[1]
     num.triplets <- dim(mcmc.chains[[1]])[2]
     triplets <- t(combn(1:num.entities, 3))
@@ -1227,7 +1227,7 @@ stats.posteriors <- function(num.chains = 1, mcmc.chains = NULL, num.entities = 
                              name = NULL, CI = TRUE, level = 0.95, hpd = TRUE, decimal = NULL, 
                              silent.flag = FALSE, null.relations = c("grad", "curl", "M")) 
   {
-  if (name == "Phi") {
+  if (name == "Phi" || name == "C") {
     for (chain in 1:num.chains) {
       if (!silent.flag) cat("Chain", chain, "\n")
       mcmc <- dim(mcmc.chains[[chain]])[1]
