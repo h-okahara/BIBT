@@ -73,9 +73,6 @@ Rcpp::List BIBT_Gibbs_cpp(int mcmc, int burn, int thin,
   arma::vec I_pos(mcmc_row);
   arma::mat C_pos(mcmc_row, num_triplets);
   
-  double sigma_sq = sigma * sigma;
-  double inv_sigma_sq = 1.0 / sigma_sq;
-  
   int sample_idx = 0;
   //=======================   BEGIN MCMC sampling   =============================
   for (int iter = 1; iter <= mcmc; ++iter) {
@@ -85,6 +82,8 @@ Rcpp::List BIBT_Gibbs_cpp(int mcmc, int burn, int thin,
     omega = pg::rpg_hybrid(n_ij, M_vec_abs_loop);
     
     // Updating s: num_entities×1 score vector
+    double sigma_sq = sigma * sigma;
+    double inv_sigma_sq = 1.0 / sigma_sq;    
     arma::sp_mat G_omega = G;
     for (arma::sp_mat::iterator iter = G_omega.begin(); iter != G_omega.end(); ++iter) {
       *iter *= std::sqrt(omega(iter.row()));
@@ -221,9 +220,6 @@ Rcpp::List BBT_Gibbs_cpp(int mcmc, int burn, int thin,
   arma::vec sigma_pos(mcmc_row);
   arma::mat M_pos(mcmc_row, num_pairs);
   
-  double sigma_sq = sigma * sigma;
-  double inv_sigma_sq = 1.0 / sigma_sq;
-  
   int sample_idx = 0;
   //=======================   BEGIN MCMC sampling   =============================
   for (int iter = 1; iter <= mcmc; ++iter) {
@@ -233,6 +229,8 @@ Rcpp::List BBT_Gibbs_cpp(int mcmc, int burn, int thin,
     omega = pg::rpg_hybrid(n_ij, M_vec_abs_loop);
     
     // Updating s: num_entities×1 score vector
+    double sigma_sq = sigma * sigma;
+    double inv_sigma_sq = 1.0 / sigma_sq;
     arma::sp_mat G_omega = G;
     for (arma::sp_mat::iterator iter = G_omega.begin(); iter != G_omega.end(); ++iter) {
       *iter *= std::sqrt(omega(iter.row()));
