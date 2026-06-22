@@ -1,44 +1,56 @@
 #
-# Sourcing this R file contains 3 parts.
-#
-# Import & Setting, MCMC & Visualization, Simulations
+# This is the main execution script, divided into 3 main parts:
+# 1. Import & Setting:      Loads libraries, C++ functions, subroutines, and datasets.
+# 2. MCMC & Visualization:  Runs the specified model on real (artificial) data and plots posteriors/networks.
+# 3. Simulations:           Runs simulation studies (Sections 5, S4.1, and S4.2) and saves results.
 #
 ######################  BEGIN Import & Setting  ################################
 
 source("libraries.R")
-list.files("RJMCMC alg", full.names = TRUE) %>%   # For ICBT model
+list.files("RJMCMC alg", full.names = TRUE) %>%   # For the ICBT model
   purrr::walk(source)
-sourceCpp("BIBT.cpp")  # For BIBT model
+sourceCpp("functions.cpp") # For the CA-BIBT, BIBT, CARE, and BBT models
 source("functions.R")
 source("database.R")
 
-## For Real Data:
-X <- database$mlb
-entities.name <- database$name.mlb
-network.true <- database$network.mlb
-num.entities <- length(entities.name)  # number of entities
-triplets <- t(combn(1:num.entities, 3))
-num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
+## Real Data ----
+X <- database$dom2
+X_E <- database$X_E.dom2
+entity.name <- database$name.dom2
+network.true <- database$network.dom2
+if (!is.null(X_E)) {
+  dim.cov <- nrow(X_E)
+} else {
+  dim.cov <- 0
+}
+num.entities <- length(entity.name)
 num.free <- choose(num.entities-1,2)
+operators <- build.hodge_operators(num.entities = num.entities, X_E = X_E)
 networks.true <- plot.networks(compute.M(X), num.entities = num.entities, components = c("M"),
                                weight = "prop", layout = "circle", tie_mode = "skip")
 
-## For Artificial Data:
-num.entities <- 10
-triplets <- t(combn(1:num.entities, 3))
-num.triplets <- nrow(triplets)  # number of unique (i,j,k) triplets
+## Artificial Data ----
+num.entities <- 20
+entity.name <- 1:num.entities
 num.free <- choose(num.entities-1,2)
-w.true <- rep(0, num.free)
-# w.true[1] <- 5
-#w.true[6] <- 4
-#w.true[8] <- 6
-#w.true <- compute.spPhi.true(num.entities = num.entities, norm = 2.5, seed = 1, 
-#                             sparsity.level = 0.5)$weights
-artificial.data <- generate.artificial.data(num.entities = num.entities, s_interval = 0.5, freq.pair = 100, weights = w.true)
+dim.cov <- 3
+PARAMS.DEFAULT <- list(
+  beta_mean = 0, beta_sd = 1, X_E_mean = 0, X_E_sd = 1, # Covariates
+  u_mean = 0, u_sd = 1.0, s_mean = 0, s_sd = 1.0,       # Score / Gradient
+  z_mean = 0, z_sd = 1.0,                               # Curl / Triangular
+  Phi_norm = 1.0, sparsity.level = 0.6
+  )
+params.true <- generate.flows(num.entities = num.entities, 
+                              dim.cov = dim.cov, params.true = PARAMS.DEFAULT)
+X_E <- params.true$X_E
+
+artificial.data <- generate.artificial.data(num.entities = num.entities, num.freq = 20,
+                                            s = params.true$s, Phi = params.true$Phi,
+                                            X_E = X_E, beta = params.true$beta)
 X <- artificial.data$X
-entities.name <- artificial.data$entity.names
-networks.true <- plot.networks(artificial.data$relations, num.entities = num.entities,
-                               components = c("grad", "curl", "M"), 
+plot.FBR.true(artificial.data$flows$M, num.entities = num.entities, names = entity.name)
+networks.true <- plot.networks(artificial.data$flows, num.entities = num.entities,
+                               components = c("grad", "curl", "cov", "M"), 
                                weight = "prop", layout = "circle", tie_mode = "skip")
 
 ######################  END Import & Setting  ##################################
@@ -51,18 +63,17 @@ networks.true <- plot.networks(artificial.data$relations, num.entities = num.ent
 num.chains <- 1
 num.iter <- 10000
 num.burn <- num.iter/5
-model <- "BIBT.cpp"   # Options: (BIBT.R, BIBT.cpp, ICBT, BBT.Stan, BBT.cpp, BBT.R)
-param.name <- "s" # Options: (s, sigma, weights, Phi, lambda, tau, nu, xi, grad, curl, M)
+model <- "BIBT"        # Options: (CA-BIBT, BIBT, CARE, BBT, ICBT)
+param.name <- "M"      # Options: name %in% MODEL.PARAMS
 
 ## Prior specification
-BBT.priors <- list(s.prior       = rep(0, num.entities), sigma.prior = 2.5)
-BIBT.priors <- list(s.prior       = rep(0, num.entities),
-                    sigma.prior   = 2.5,
-                    weights.prior = rep(0, num.free),
-                    lambda.prior  = rep(1, num.free), 
-                    tau.prior     = 1, 
-                    nu.prior      = rep(1, num.free), 
-                    xi.prior      = 1)
+model.priors <- list(X_E = X_E, threshold = 0.5, 
+                     beta = if (dim.cov!=0) 0 else NULL, 
+                     u = 0, z = 0,
+                     lambda = 1, nu = 1, tau= 1, xi = 1,
+                     sigma_u = 2.5, sigma_beta = if (dim.cov!=0) 2.5 else NULL,
+                     a = 0.5, b = 0.5)  # Default: Horseshoe prior (a=b=0.5)
+if (model == "CARE") model.priors$X_E <- extract.entity_covariates(X_E, num.entities)$X_grad
 ICBT.priors <- list(alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
                     gamma_A = 1, lambda_A = 10, nu_A = 1)
 
@@ -70,138 +81,100 @@ ICBT.priors <- list(alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
 mcmc.results <- run.MCMCs(model = model, num.chains = num.chains, name = param.name, num.entities = num.entities,
                           MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
                           X, mcmc = num.iter, burn = num.burn, thin = 1, seed = 73,
-                          BIBT.params = BIBT.priors, ICBT.params = ICBT.priors, BBT.params = BBT.priors)
+                          model.priors = model.priors)
 
 ## Extract MCMC sample for specified parameter (name)
 specific.mcmc <- mcmc.extract(mcmc.results$all.mcmc, num.entities, param.name, rhat = FALSE, ess = FALSE)
-
-## Represent information for the posterior of specified parameter.
-plot.MCMCs(num.chains, specific.mcmc, num.entities, param.name)       # plot MCMC sample path
-plot.posteriors(num.chains, specific.mcmc, num.entities, param.name)  # plot MCMC histgram
-plot.ACFs(num.chains, specific.mcmc, num.entities, param.name)        # plot autocorrelation function (ACF)
 specifics.estimates <- stats.posteriors(num.chains, specific.mcmc, num.entities, param.name,
-                                        CI = TRUE, level = 0.95, hpd = TRUE, decimal = 3)  # compute the mean, median and sds
+                                        CI = TRUE, level = 0.95, hpd = TRUE, decimal = 3)  # Compute the mean, median and sds
 
-## Plot Global Intransitivity Measure and Local Vorticity
+## Represent information for the posterior of specified parameter
+plot.MCMCs(num.chains, specific.mcmc, num.entities, param.name)       # Plot MCMC sample path
+plot.posteriors(num.chains, specific.mcmc, num.entities, param.name)  # Plot MCMC histgram
+plot.ACFs(num.chains, specific.mcmc, num.entities, param.name)        # Plot autocorrelation function (ACF)
+plot.flows(model, mcmc.result = mcmc.results$all.mcmc[[1]], num.entities = num.entities, names = entity.name) # Plot each flows as heatmap
+print.ST(mcmc.results$all.mcmc)            # Print posterior probabilities of ST classes
+print.Ratios(mcmc.results$all.mcmc, model) # Print flow contribution ratios
+plot.FBR(mcmc.M = mcmc.results$all.mcmc[[1]]$M, num.entities = num.entities, # Plot the finest blockwise rankings 
+         names = entity.name, alpha.vec = c(0.1, 0.15, 0.2))
+
+## Plot LV
+stats.posteriors(num.chains, mcmc.extract(mcmc.results$all.mcmc, num.entities, name = "LV"), 
+                 num.entities, param.name,
+                 CI = TRUE, level = 0.95, hpd = TRUE, decimal = 3)
 plot.vorticity.hist(specifics.estimates$mean)
-plot.vorticity.forest(results = specific.mcmc[[1]], names = entities.name, top_k = 10)
+plot.vorticity.forest(results = specific.mcmc[[1]], names = entity.name, top_k = 10)
 
 ## Draw network and check differences
-statistic <- "mean" # Options ("mean", "median")
-components <- if(model=="BIBT.R" || model=="BIBT.cpp") c("grad", "curl", "M") else c("grad", "M")
+statistic <- "mean"   # Options ("mean", "median")
+components <- if(model == "CA-BIBT") {
+  c("grad", "curl", "cov", "M")
+} else if (model == "BIBT") {
+  c("grad", "curl", "M") 
+} else if (model == "CARE") {
+  c("grad", "cov", "M")
+} else {
+  c("grad", "M")
+}
 estimates.list <- lapply(components, function(comp.name) {
   stats.posteriors(num.chains, mcmc.extract(mcmc.results$all.mcmc, num.entities, comp.name),
-                   num.entities = num.entities, name = comp.name, decimal = 6,
-                   silent.flag = TRUE, null.relations = NULL)
+                   num.entities = num.entities, name = comp.name, decimal = 6, silent.flag = TRUE)
   })
 estimates.list <- lapply(estimates.list, `[[`, statistic)
-relations.estimates <- do.call(cbind, estimates.list)
-colnames(relations.estimates) <- components
-network.estimates <- plot.networks(relations.estimates, num.entities = num.entities,
+flows.estimates <- do.call(cbind, estimates.list)
+colnames(flows.estimates) <- components
+network.estimates <- plot.networks(flows.estimates, num.entities = num.entities,
                                    components = components,
                                    layout.coords = networks.true$layout,
                                    weight = "prop", layout = "circle", tie_mode = "skip")
 plot.reversed_edges(network.estimates$graphs, networks.true$graphs, networks.true$layout)
 
-
-## Plot parameters 's'
-points.ICBT <- BT.freq(X, sort.flag = FALSE, desc.flag = FALSE, draw.flag = TRUE, decimal = 5) # ICBT model
-points.ICBT <- points.ICBT$s - mean(points.ICBT$s)
-
-## Prior specification
-BBT.priors <- list(s.prior        = rep(0, num.entities), sigma.prior = 2.5)
-BIBT.priors <- list(s.prior       = rep(0, num.entities),
-                    sigma.prior   = 2.5,
-                    weights.prior = rep(0, num.free),
-                    lambda.prior  = rep(1, num.free), 
-                    tau.prior     = 1, 
-                    nu.prior      = rep(1, num.free), 
-                    xi.prior      = 1)
-ICBT.priors <- list(alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
-                    gamma_A = 1, lambda_A = 10, nu_A = 1)
-
-# BBT model
-mcmc.BBT <- run.MCMCs(model = "BBT.Stan", num.chains = 1, name = "s", num.entities = num.entities,
-                      MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
-                      X, mcmc = 10000, burn = 2000, thin = 1, seed = 73,
-                      BIBT.params = BIBT.priors, ICBT.params = ICBT.priors, BBT.params = BBT.priors)
-
-# BIBT model
-mcmc.BIBT <- run.MCMCs(model = "BIBT.cpp", num.chains = 1, name = "s", num.entities = num.entities,
-                       MCMC.plot = FALSE, rhat = FALSE, ess = FALSE,
-                       X, mcmc = 10000, burn = 2000, thin = 1, seed = 73,
-                       BIBT.params = BIBT.priors, ICBT.params = ICBT.priors, BBT.params = BBT.priors)
-
-plot.s(mcmc.BBT = mcmc.BBT$name.mcmc[[1]], points.ICBT = points.ICBT, 
-       mcmc.BIBT = mcmc.BIBT$name.mcmc[[1]], names = entities.name, order = "desc")
-plot.relations(mcmc.BIBT = mcmc.BIBT$all.mcmc[[1]], Types = c("grad", "curl", "M"), 
-               num.entities = num.entities, names = entities.name, order = "desc")
-
 ##########################  END MCMC & Visualization  ##########################
-
 
 
 #############################  BEGIN Simulations  ##############################
 
 ## Setting
-num.cores    <- 10    # the number of cores to parallel
-num.replica  <- 100   # the number of datasets
-num.entities <- 10    # the number of entities
-num.triplets <- choose(num.entities,3)
-num.free <- choose(num.entities-1,2)
+num.cores    <- detectCores()-2 # the number of cores to parallel
+num.replica  <- 10             # the number of datasets
+num.entities <- 20              # the number of entities
+num.freq <- 20
+dim.cov <- 3
+models <- c("BBT", "CARE", "ICBT", "BIBT", "CA-BIBT")
+mcmc.params <- list(mcmc = 10000, burn = 2000, thin = 1, level = 0.95, hpd = TRUE)
+d_true <- 10
+d.vec <- c(0, 5, d_true)
+model.priors <- list(threshold = 0.5, beta = 0, u = 0, z = 0, 
+                     lambda = 1, nu = 1, tau= 1, xi = 1,
+                     sigma_u = 2.5, sigma_beta = 2.5,
+                     a = 0.5, b = 0.5)
 
-mcmc.params <- list(mcmc   = 10000,
-                    burn   = 2000,
-                    thin   = 1,
-                    levels = c(seq(0.1, 0.9, by = 0.1) , 0.95),
-                    hpd    = TRUE)
-data.params <- list(s.sd = 1,
-                    freq.range = c(5, 100),
-                    w.params = list(norm = 2, sparsity = 0))
-BIBT.params <- list(s.prior       = rep(0, num.entities),
-                    sigma.prior   = 2.5,
-                    weights.prior = rep(0, num.free),
-                    lambda.prior  = rep(1, num.free),
-                    tau.prior     = 1,
-                    nu.prior      = rep(1, num.free),
-                    xi.prior      = 1)
-ICBT.params <- list(alpha = 1.5, beta = 2, gamma = 1, lambda = 3,
-                    gamma_A = 1, lambda_A = 10, nu_A = 1)
+## Simulation for Comparing Models in Section 5 and S4.1
+result.list <- run.simulation(num.cores = num.cores, num.replica = num.replica,
+                              num.entities = num.entities, dim.cov = dim.cov, num.freq = num.freq,
+                              R_x.vec = seq(0.1, 0.9, by = 0.1), alpha = 1.0,
+                              models = models, mcmc.params = mcmc.params)
+success.flag <- store.csv(result.list, file.name = paste0("result_Model5_N", num.entities, "_n", num.freq, "_E1"))
 
-success.flag <- list()
-for (i in 1:10) {
-  if (i != 0 && i != 10) {
-    setting <- "sparse"
-    data.params$w.params$sparsity <- i/10
-  } else if (i == 0) {
-    setting <- "dense"
-  } else if (i == 10) {
-    setting <- "transitive"
-    data.params$w.params$sparsity <- 1
-  }
-  data.params$w.params$norm <- 5 - 0.5 * i
-  results <- run.simulation(num.cores    = num.cores,
-                            num.replica  = num.replica,
-                            num.entities = num.entities,
-                            setting      = setting,
-                            decimal      = 3,
-                            mcmc.params  = mcmc.params,
-                            data.params  = data.params,
-                            BIBT.params  = BIBT.params,
-                            ICBT.params  = ICBT.params)
-  success.flag[i] <- store.csv(results$All, num.entities = num.entities, file.name = "results")
-}
+df.list <- read.csv(file.path(getwd(), paste0("result_Model5_N", num.entities, "_n", num.freq, "_E1/Aggregated.csv"))) # For Section 5
+# df1 <- read.csv(file.path(getwd(), paste0("result_Model4_N", num.entities, "_n", num.freq, "_E1/Aggregated.csv")))     # For S4.1
+# df025 <- read.csv(file.path(getwd(), paste0("result_Model4_N", num.entities, "_n", num.freq, "_E025/Aggregated.csv"))) # For S4.1
+# df.list <- list(df025, df1)
+plot.simulation(df.list, Types = c("sMSE", "Accuracy"), models = models)   # Plot the resulting sMSE and Accuracy
+print.simulation_summary(df.list, models = models, Types = c("CP", "CIL")) # Print means of coverage probabilities 
+                                                                           # and execution times
 
-df <- read.csv(file.path(getwd(), paste0("N = ", num.entities, "_freq = 100_nsF1/metrics1_", num.entities, ".csv"))) # paste0("results/metrics1_", num.entities, ".csv")))
-tmp <- df[df$Estimator == "Mean", ]
-plot.Metrics1(tmp, Types = c("MSE_M", "MSE_grad", "MSE_curl"))
-plot.Metrics1(tmp, Types = c("Accuracy"))
+## Simulation for Incomplete Data in S4.2
+result.list <- run.simulation.incompleteness(num.cores = num.cores, num.replica = num.replica,
+                                             num.entities = num.entities, d_true = d_true, d.vec = d.vec,
+                                             num.freq = num.freq, R_x = 0.3, alpha = 1.0,
+                                             rho.vec = seq(0.5, 1.0, by = 0.1), model.priors = model.priors,
+                                             mcmc.params = list(mcmc = 10000, burn = 2000, thin = 1, level = 0.95))
+success.flag <- store.csv(result.list, file.name = paste0("result_incomplete_d", d_true, "_N", num.entities, "_n", num.freq, "_E1"))
 
-df <- read.csv(file.path(getwd(), paste0("N = ", num.entities, "_freq = 100_nsF1/metrics2_", num.entities, ".csv"))) # paste0("results/metrics2_", num.entities, ".csv")))
-tmp <- df[df$Estimator == "Mean" & df$sparsity == 0.5, ]
-plot.Metrics2(tmp, Types = c("Recall", "Precision", "F1"))
-
-df <- read.csv(file.path(getwd(), paste0("N = ", num.entities, "_freq = 100_nsF1/CP_", num.entities, ".csv"))) # paste0("results/CP_", num.entities, ".csv")))
-df[df$Model == "BBT" & df$Estimator == "Mean" & df$sparsity == 1, ]
-
+df.incom <- read.csv(file.path(getwd(), paste0("result_incomplete_d", d_true, "_N", num.entities, "_n", num.freq, "_E1/Aggregated.csv")))
+plot.simulation.incompleteness(df.incom, missing.frag = TRUE, Types = c("sMSE", "Accuracy"))       # Plot the resulting sMSE and Accuracy
+plot.simulation.incompleteness.CP_CIL(df.incom, Types = c("CP", "CIL"), level = mcmc.params$level) # Plot or print means of Coverage Probabilities (CP) 
+print.simulation_summary.incompleteness(df.incom, missing.frag = FALSE, Types = c("CP", "CIL"))     # and Credible Interval Length (CIL)
+  
 ##############################  END Simulations  ###############################
