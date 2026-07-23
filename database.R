@@ -46,25 +46,40 @@ database$dom1 <- expand.grid(
     player1 = factor(player1, levels = database$name.dom1),
     player2 = factor(player2, levels = database$name.dom1)
   )
+database$dom1 <- align.X(database$dom1)
 database$network.dom1 <- plot.networks(compute.M(database$dom1), num.entities = num.entities, components = c("M"),
                                       draw.flag = FALSE, weight = "prop", layout = "fr", tie_mode = "thin")
 
 ## Covariates Information
-database$covs.dom1 <- data.frame(
-  entity.name = database$name.dom1,
-  sex    = c("female", "female", "female", "female", "female", "male", "male", "male", "male", "male"),
-  weight = c(19.1, 19.2, 18.3, 19.4, 16.1, 16.0, 20.4, 17.5, 16.4, 18.2)
+covs.raw <- data.frame(
+  entity.name = c("a14", "a15", "a17", "a18", "a19",
+                  "a39", "a55", "a58", "a97", "a98"),
+  sex    = c("female", "female", "female", "female", "female",
+             "male",   "male",   "male",   "male",   "male"),
+  weight = c(19.1, 19.2, 18.3, 19.4, 16.1,
+             16.0, 20.4, 17.5, 16.4, 18.2),
+  stringsAsFactors = FALSE
 )
-
+idx <- match(database$name.dom1, covs.raw$entity.name)
+if (anyNA(idx)) {
+  stop(sprintf("Covariate information missing for: %s",
+               paste(database$name.dom1[is.na(idx)], collapse = ", ")))
+}
+database$covs.dom1 <- covs.raw[idx, ]
+rownames(database$covs.dom1) <- NULL
 
 ## Build Covariate Matrix X_E for Canary Dominance Data
 sex.idx <- ifelse(database$covs.dom1$sex == "male", 1, 0)
 weights <- as.vector(scale(database$covs.dom1$weight))
+mate.pairs.name <- list(c("a14", "a58"), c("a15", "a55"), c("a17", "a39"),
+                        c("a18", "a98"), c("a19", "a97"))
 m.mat <- matrix(0, nrow = num.entities, ncol = num.entities)
-mate.idx <- list(c(1, 8), c(2, 7), c(3, 6), c(4, 10), c(5, 9))
-for (mp in mate.idx) {
-  i <- mp[1]
-  j <- mp[2]
+for (mp in mate.pairs.name) {
+  i <- match(mp[1], database$name.dom1)
+  j <- match(mp[2], database$name.dom1)
+  if (anyNA(c(i, j))) {
+    stop(sprintf("Mate pair contains unknown entity: %s - %s", mp[1], mp[2]))
+  }
   m.mat[i, j] <- 1
   m.mat[j, i] <- 1
 }
@@ -81,7 +96,7 @@ mate.vec <- m.mat[cbind(p1, p2)]
 X_E[1, ] <- sex.diff
 X_E[2, ] <- mate.vec * sex.diff
 database$X_E.dom1 <- X_E
-
+})
 
 
 
@@ -90,6 +105,7 @@ database$X_E.dom1 <- X_E
 ###    DomArchive Data from https://github.com/DomArchive/DomArchive    ###
 ###---------------------------------------------------------------------###
 
+local({
 target_fileid <- "Correa_2013a" # Total Interactions
 raw_data <- dom.data[[target_fileid]]
 metadata <- dom.metadata %>% filter(fileid == target_fileid)
@@ -124,6 +140,7 @@ database$dom2 <- expand.grid(
     player1 = factor(player1, levels = database$name.dom2),
     player2 = factor(player2, levels = database$name.dom2)
   )
+database$dom2 <- align.X(database$dom2)
 database$network.dom2 <- plot.networks(compute.M(database$dom2), num.entities = num.entities, components = c("M"),
                                       draw.flag = FALSE, weight = "prop", layout = "fr", tie_mode = "thin")
 })

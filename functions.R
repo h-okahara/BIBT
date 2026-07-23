@@ -7,17 +7,18 @@
 #
 # - For Running MCMC & Subroutines:
 #     run.MCMCs, mcmc.extract, stats.posteriors, build.hodge_operators,
-#     print.ST, print.Ratios, compute.FBR, compute.BFDR, calibrate.BFDR
+#     print.ST, print.Ratios, compute.FBR, compute.BFDR, calibrate.BFDR, calibrate.DG
 #
 # - For Simulations & Data Processing:
-#     compute.M, extract.entity_covariates, generate.flows, compute.spPhi.true,
+#     compute.M, align.X, extract.entity_covariates, generate.flows, compute.spPhi.true,
 #     generate.artificial.data, run.simulation, store.csv, print.simulation_summary,
 #     run.simulation.incompleteness, print.simulation_summary.incompleteness
 #
 # - For Visualization:
-#     plot.MCMCs, plot.posteriors, plot.ACFs, plot.FBR, plot.FBR.true,
+#     plot.MCMCs, plot.posteriors, plot.ACFs, plot.FBR, plot.DG, plot.FBR.true,
 #     plot.flows, plot.networks, plot.reversed_edges, plot.simulation,
-#     plot.simulation.incompleteness, plot.vorticity.hist, plot.vorticity.forest
+#     plot.simulation.incompleteness, plot.simulation.incompleteness.CP_CIL, 
+#     plot.vorticity.hist, plot.vorticity.forest
 #
 #################  Global Parameter Configurations for Models  #################
 
@@ -44,7 +45,7 @@ MODEL.PARAMS$single.idx <- c(MODEL.PARAMS$entity, MODEL.PARAMS$grad.sp, MODEL.PA
 ###--------------------------------------------###
 
 ## INPUT:
-# X:                An N×N matrix where the (i,j) entry indicates that player i defeats player j;
+# X:                A data frame in binomial format with one row per comparison pair (choose(N, 2) rows);
 # X_E:              A d × num.pairs matrix representing the edge-specific covariates for each pair;
 # include_curl:     Logical. If TRUE, the model incorporates the curl flow;
 # mcmc:             Integer. Number of iterations;
@@ -77,10 +78,24 @@ CA_BIBT.cpp <- function(X, X_E = NULL, include_curl = TRUE,
                         u.prior = NULL, sigma_u.prior = NULL, z.prior = NULL,
                         lambda.prior = NULL, tau.prior = NULL, nu.prior = NULL, xi.prior = NULL,
                         a = 0.5, b = 0.5)
-{
-  entity.name <- sort(unique(c(as.character(X$player1), as.character(X$player2)))) #unique(c(X$player1, X$player2))
-  num.entities <- length(entity.name)
-  pairs <- t(combn(num.entities, 2))
+  {
+  ## Preparation
+  if (is.factor(X$player1) && is.factor(X$player2)) {
+    entity.name <- levels(X$player1)
+    if (!identical(entity.name, levels(X$player2))) {
+      stop("levels(X$player1) and levels(X$player2) must be identical.")
+    }
+  } else {
+    entity.name <- sort(unique(c(as.character(X$player1), as.character(X$player2))))
+  }
+  num.entities <- length(entity.name)  # number of entities
+  pairs <- t(combn(1:num.entities, 2))
+  key.expected <- paste(entity.name[pairs[, 1]], entity.name[pairs[, 2]], sep = "_")
+  key.actual   <- paste(as.character(X$player1), as.character(X$player2), sep = "_")
+  if (nrow(X) != nrow(pairs) || !identical(key.expected, key.actual)) {
+    stop("X is not aligned to the canonical pair ordering. Apply align.X() first.")
+  }
+
   triplets <- t(combn(1:num.entities, 3))
   num.pairs <- nrow(pairs)      
   num.triplets <- nrow(triplets)
@@ -180,14 +195,14 @@ CA_BIBT.cpp <- function(X, X_E = NULL, include_curl = TRUE,
 ###----------------------------------------------------------###
 
 ## INPUT:
-# X:            An N×N matrix where the (i,j) entry indicates that player i defeats player j;
-# mcmc:         Integer. Number of iterations;
-# burn:         Burn-in period;
-# thin:         A thinning interval;
-# operators:    A list containing basis matrices;
-# s.BT:         A N×1 vector estimated by Bradley-Terry model using BradleyTerry2 package;
-# M.BT:         A num.pairs×1 vector estimated by Bradley-Terry model using BradleyTerry2 package;
-# others:       Hyperparameters of the ICBT model e.g., alpha,beta,....
+# X:          A data frame in binomial format with one row per comparison pair (choose(N, 2) rows);
+# mcmc:       Integer. Number of iterations;
+# burn:       Burn-in period;
+# thin:       A thinning interval;
+# operators:  A list containing basis matrices;
+# s.BT:       A N×1 vector estimated by Bradley-Terry model using BradleyTerry2 package;
+# M.BT:       A num.pairs×1 vector estimated by Bradley-Terry model using BradleyTerry2 package;
+# others:     Hyperparameters of the ICBT model e.g., alpha,beta,....
 
 ## OUTPUT:
 # A list containing the MCMC posterior samples and metrics:
@@ -202,9 +217,22 @@ ICBT.RJMCMC <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
                         gamma_A = 1, lambda_A = 10, nu_A = 1)
   {
   ## Preparation
-  entity.name <- sort(unique(c(as.character(X$player1), as.character(X$player2)))) #unique(c(X$player1, X$player2))
+  if (is.factor(X$player1) && is.factor(X$player2)) {
+    entity.name <- levels(X$player1)
+    if (!identical(entity.name, levels(X$player2))) {
+      stop("levels(X$player1) and levels(X$player2) must be identical.")
+    }
+  } else {
+    entity.name <- sort(unique(c(as.character(X$player1), as.character(X$player2))))
+  }
   num.entities <- length(entity.name)  # number of entities
   pairs <- t(combn(1:num.entities, 2))
+  key.expected <- paste(entity.name[pairs[, 1]], entity.name[pairs[, 2]], sep = "_")
+  key.actual   <- paste(as.character(X$player1), as.character(X$player2), sep = "_")
+  if (nrow(X) != nrow(pairs) || !identical(key.expected, key.actual)) {
+    stop("X is not aligned to the canonical pair ordering. Apply align.X() first.")
+  }
+  
   pairs_free.idx <- which(pairs[, 1] != 1)  # Indices of identifiable pairs
   num.pairs <- nrow(pairs)
   num.free <- choose(num.entities-1,2)
@@ -212,7 +240,7 @@ ICBT.RJMCMC <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
   num.burn1 <- floor(burn / 2)
   num.burn2 <- ceiling(burn / 2)
   
-  ## Calculate 'grad' and 'M' samples
+  ## Build the gradient operator G
   if(is.null(operators)) operators <- build.hodge_operators(num.entities = num.entities, tol = 1e-10)
   G <- operators$G
   
@@ -288,7 +316,7 @@ ICBT.RJMCMC <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
   
   ## Reparameterization
   grad_re <- as.vector(G %*% s.BT)
-  grad_re.pos  <- matrix(grad_re, nrow = mcmc, ncol = num.pairs, byrow = TRUE)
+  grad_re.pos  <- matrix(grad_re, nrow = num.sampling, ncol = num.pairs, byrow = TRUE)
   theta_re.pos <- M.pos - M.BT
   
   ## Calculate Flow Contribution Ratios
@@ -320,7 +348,7 @@ ICBT.RJMCMC <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
 ###--------------------------------###
 
 ## INPUT:
-# X:              An N×N matrix where the (i,j) entry indicates that player i defeats player j;
+# X:              A data frame in binomial format with one row per comparison pair (choose(N, 2) rows);
 # sort.flag:      Logical. If TRUE, sort the entity along with `desc.flag';
 # desc.flag:      Logical. If TRUE, sort the entity in descending order;
 # networks.true:  A list containing the true graph objects;
@@ -331,11 +359,25 @@ ICBT.RJMCMC <- function(X, mcmc = 10000, burn = 2000, thin = 1, operators = NULL
 # A directed graph created from flows.
 # Draws the specified network graphs and invisibly returns a list containing the graph objects.
 
-BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE, 
+BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE,
                     networks.true = NULL, draw.flag = FALSE, decimal = 3) {
   ## Preparation
-  entity.name <- sort(unique(c(as.character(X$player1), as.character(X$player2)))) #unique(c(X$player1, X$player2))
-  num.entities <- length(entity.name)    # number of entities
+  if (is.factor(X$player1) && is.factor(X$player2)) {
+    entity.name <- levels(X$player1)
+    if (!identical(entity.name, levels(X$player2))) {
+      stop("levels(X$player1) and levels(X$player2) must be identical.")
+    }
+  } else {
+    entity.name <- sort(unique(c(as.character(X$player1), as.character(X$player2))))
+  }
+  num.entities <- length(entity.name)  # number of entities
+  pairs <- t(combn(1:num.entities, 2))
+  key.expected <- paste(entity.name[pairs[, 1]], entity.name[pairs[, 2]], sep = "_")
+  key.actual   <- paste(as.character(X$player1), as.character(X$player2), sep = "_")
+  if (nrow(X) != nrow(pairs) || !identical(key.expected, key.actual)) {
+    stop("X is not aligned to the canonical pair ordering. Apply align.X() first.")
+  }
+  
   reference <- entity.name[num.entities] # fix the last entity
   citeModel <- BTm(data = X, outcome = cbind(win1, win2), player1, player2,
                    formula = ~player, id = "player", refcat = as.character(reference))
@@ -355,7 +397,7 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE,
     names.sorted <- rownames(citations.qv$qvframe)[idx]
     if (draw.flag) plot(citations.qv.sorted, levelNames = names.sorted)
   } else {
-    qvframe.sorted <- citations.qv$qvframe[rep(1:num.entities), ]
+    qvframe.sorted <- citations.qv$qvframe[(1:num.entities), ]
     citations.qv.sorted <- citations.qv
     citations.qv.sorted$qvframe <- qvframe.sorted
     names.sorted <- rownames(citations.qv$qvframe)[1:num.entities]
@@ -363,7 +405,6 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE,
   }
   
   ## Visualization
-  pairs <- t(combn(num.entities, 2))
   M.BT <- citations.qv$qvframe$estimate[pairs[,1]] - citations.qv$qvframe$estimate[pairs[,2]]
   flows.BT <- round(cbind(M.BT, M.BT), decimal)
   colnames(flows.BT) <- c("grad", "M")
@@ -397,15 +438,15 @@ BT.freq <- function(X, sort.flag = TRUE, desc.flag = TRUE,
 # num.chains:     Number of independent MCMC chains to run;
 # num.entities:   Number of entities (e.g., items or players);
 # name:           A string representing the name of parameters;
-# MCMC.plot       Logical. If TRUE, print MCMC sample paths for the specified parameters;
+# MCMC.plot:      Logical. If TRUE, print MCMC sample paths for the specified parameters;
 # rhat:           Logical. If TRUE, compute and print Rhat values;
 # ess:            Logical. If TRUE, compute and print Effective Sample Size (ESS);
-# X:              An N×N matrix where the (i, j) entry indicates that player i defeats player j;
+# X:              A data frame in binomial format with one row per comparison pair (choose(N, 2) rows);
 # mcmc:           Integer. Number of iterations;
 # burn:           Burn-in period;
 # thin:           A thinning interval;
 # seed:           Integer: Random seed for reproducibility;
-# model.priors:   A list of priors cerresponding to 'model'.
+# model.priors:   A list of priors corresponding to 'model'.
 
 ## OUTPUT:
 # A list of MCMC draws from multiple chains.
@@ -488,7 +529,7 @@ run.MCMCs <- function(model = c("CA-BIBT", "BIBT", "CARE", "BBT", "ICBT"),
   
   ## Plot MCMC sample paths
   if (MCMC.plot) {
-    plot.MCMCs(num.chains, mcmc.chains, name, num.entities)
+    plot.MCMCs(num.chains, mcmc.chains, num.entities, name)
   }
   
   print(paste("Total runtime: ", round(difftime(Sys.time(), start.time, units = "sec"), 3), "seconds"))
@@ -787,7 +828,7 @@ plot.ACFs <- function(num.chains = 1, mcmc.chains = NULL, num.entities = NULL, n
 # mcmc.chains:    A list of specific MCMC samples from each chain;
 # num.entities:   Number of entities (e.g., items or players);
 # name:           A string representing the name of parameters;
-# rhat:           Logical. If TRUE, compute and print credible intervals (lower and uppper bounds);
+# CI:             Logical. If TRUE, compute and print credible intervals (lower and upper bounds);
 # level:          The credible interval level (e.g., 0.95);
 # hpd:            Logical. If TRUE, return the Highest Posterior Density (HPD) interval;
 # decimal:        Number of decimal places;
@@ -1018,7 +1059,7 @@ build.hodge_operators <- function(num.entities = NULL, tol = 1e-10, X_E = NULL) 
   C_x <- c(rep(1, num.triplets), rep(1, num.triplets), rep(-1, num.triplets))
   C.ast <- Matrix::sparseMatrix(i = C_i, j = C_j, x = C_x, dims = c(num.pairs, num.triplets))
   
-  ## Compute row space basis H (Largest Magnitude)
+  ## Extract orthonormal bases for row space (H) and null space (A) of C.ast via SVD
   C.ast.rank <- num.free  # rank of C.ast
   C.ast.svd <- svd(as.matrix(C.ast), nu = 0, nv = num.triplets)
   H <- C.ast.svd$v[, 1:C.ast.rank, drop = FALSE] # basis for row space
@@ -1358,8 +1399,89 @@ calibrate.BFDR <- function(mcmc.M, num.entities = NULL, alpha = 0.05) {
   ))
 }
 
-##############################  END Subroutines  ###############################
 
+
+
+###-----------------------------------------------###
+###    Calibrate Dominance Graph (DG) via BFDR    ###
+###-----------------------------------------------###
+
+## INPUT:
+# mcmc.M:       A matrix of MCMC samples for the latent match-up function 'M';
+# num.entities: Number of entities (e.g., items or players);
+# alpha:        Target BFDR control level (e.g., 0.05, 0.1).
+
+## OUTPUT:
+# A list containing:
+#   - edges:       A matrix of edge indices for the calibrated dominance graph;
+#   - theta_upper: The associated upper credibility endpoint;
+#   - theta_lower: The associated lower credibility endpoint;
+#   - BFDR:        The calculated BFDR of the selected dominance graph.
+
+calibrate.DG <- function(mcmc.M, num.entities = NULL, alpha = 0.05) {
+  ## Construct the posterior preference matrix Q from MCMC samples
+  Q <- matrix(0, num.entities, num.entities)
+  q_i <- colMeans(mcmc.M > 0)
+  q_j <- colMeans(mcmc.M < 0)
+  
+  pair.idx <- 1
+  for (i in 1:(num.entities - 1)) {
+    for (j in (i + 1):num.entities) {
+      Q[i, j] <- q_i[pair.idx]
+      Q[j, i] <- q_j[pair.idx]
+      pair.idx <- pair.idx + 1
+    }
+  }
+  
+  ## Extract and sort unique breakpoints {theta_k} where 1 = theta_0 > ... > theta_L > theta_L+1 = 0.5
+  theta.desc <- sort(unique(c(1, Q[Q > 0.5], 0.5)), decreasing = TRUE)
+  
+  graphs_info <- list()
+  for (k in 1:(length(theta.desc)-1)) {
+    epsilon <- theta.desc[k + 1]
+    A <- which(Q > epsilon, arr.ind = TRUE)
+    A <- A[A[, 1] != A[, 2], , drop = FALSE]
+    num.claims <- nrow(A)
+    
+    if (num.claims == 0) {
+      BFDR_k <- 0
+    } else {
+      error.sum <- sum(Q[cbind(A[, 2], A[, 1])], na.rm = TRUE)
+      BFDR_k <- error.sum / num.claims
+    }
+    
+    graphs_info[[k]] <- list(
+      edges = A,
+      BFDR = BFDR_k,
+      num.edges = num.claims,
+      theta_upper = theta.desc[k],
+      theta_lower = epsilon
+    )
+  }
+  
+  admissible <- Filter(function(g) g$BFDR <= alpha, graphs_info)
+  
+  if (length(admissible) == 0) {
+    return(list(
+      edges = matrix(ncol = 2, nrow = 0),
+      theta_upper = 1.0,
+      theta_lower = 1.0,
+      BFDR = 0
+    ))
+  }
+  
+  max.edges <- max(sapply(admissible, function(g) g$num.edges))
+  results.list <- Filter(function(g) g$num.edges == max.edges, admissible)[[1]]
+  
+  return(list(
+    edges = results.list$edges,
+    theta_upper = results.list$theta_upper,
+    theta_lower = results.list$theta_lower,
+    BFDR = results.list$BFDR
+  ))
+}
+
+##############################  END Subroutines  ###############################
 
 
 
@@ -1376,23 +1498,47 @@ calibrate.BFDR <- function(mcmc.M, num.entities = NULL, alpha = 0.05) {
 # A matrix with 'M' columns, ready for plot.networks.
 
 compute.M <- function(df = NULL) {
-  ## Preparation
-  entities <- sort(unique(c(as.character(df$player1), as.character(df$player2))))
-  num.entities <- length(entities)
-  pairs <- t(combn(num.entities, 2))
-  num.pairs <- nrow(pairs)
-  entity_map <- setNames(1:num.entities, entities)
-  df$player1 <- entity_map[as.character(df$player1)]
-  df$player2 <- entity_map[as.character(df$player2)]
-  
-  ## Compute M.vec
-  M.vec <- numeric(num.pairs)
-  M.vec <- df %>%
-    mutate(
-      metric = log(win1 / win2)
-    )
-  M.vec <- as.vector(M.vec$metric)
+  M.vec <- log(df$win1 / df$win2)
   return(cbind(M = M.vec))
+}
+
+
+
+
+###---------------------------------------------###
+###    Align Data to Canonical Pair Ordering    ###
+###---------------------------------------------###
+
+## INPUT:
+# X:  A data frame in binomial format with one row per comparison pair (choose(N, 2) rows).
+
+## OUTPUT:
+# A data frame aligned to the canonical pair ordering, with missing pairs filled with zeros.
+
+align.X <- function(X) {
+  ## Preparation
+  if (is.factor(X$player1) && is.factor(X$player2)) {
+    entity.name <- levels(X$player1)
+    if (!identical(entity.name, levels(X$player2))) {
+      stop("levels(X$player1) and levels(X$player2) must be identical.")
+    }
+  } else {
+    entity.name <- sort(unique(c(as.character(X$player1), as.character(X$player2))))
+  }
+  pairs <- t(combn(entity.name, 2))
+  key.canonical <- paste(pairs[, 1], pairs[, 2], sep = "_")
+  key.X <- paste(as.character(X$player1), as.character(X$player2), sep = "_")
+  idx <- match(key.canonical, key.X)
+  
+  data.frame(
+    player1 = factor(pairs[, 1], levels = entity.name),
+    player2 = factor(pairs[, 2], levels = entity.name),
+    win1 = ifelse(is.na(idx), 0L, X$win1[idx]),
+    win2 = ifelse(is.na(idx), 0L, X$win2[idx]),
+    n_ij = ifelse(is.na(idx), 0L, X$n_ij[idx]),
+    y_ij = ifelse(is.na(idx), 0L, X$y_ij[idx]),
+    stringsAsFactors = FALSE
+  )
 }
 
 
@@ -1516,10 +1662,10 @@ generate.flows <- function(num.entities = 10, dim.cov = 0, params.true = NULL, s
 ## OUTPUT:
 # A list containing the unconstrained vector (z/w), sparse Phi, iterations, and actual sparsity.
 
-compute.spPhi.true <- function(Basis = NULL, norm = 1.0, seed = 73,
+compute.spPhi.true <- function(Basis = NULL, norm = 1.0, seed = NULL,
                                sparsity.level = 0, maxit = 1000, tol = 1e-10) {
   ## Preparation
-  set.seed(seed)
+  if (!is.null(seed)) set.seed(seed)
   num.triplets <- nrow(Basis)
   dim.z <- ncol(Basis)
   
@@ -1594,10 +1740,10 @@ compute.spPhi.true <- function(Basis = NULL, norm = 1.0, seed = 73,
 generate.artificial.data <- function(num.entities = NULL, threshold = 0.5, num.freq = 20,
                                      s = NULL, Phi = NULL, X_E = NULL, beta = NULL,
                                      operators = NULL, rescale.flag = TRUE, alpha = 1.0,
-                                     R_x = 0.5, seed = 73)
+                                     R_x = 0.5, seed = NULL)
   {
   ## Preparation
-  set.seed(seed)
+  if (!is.null(seed)) set.seed(seed)
   pairs <- t(combn(num.entities, 2))
   num.pairs <- nrow(pairs)
   if(is.null(operators)) operators <- build.hodge_operators(num.entities, X_E = X_E)
@@ -1624,7 +1770,7 @@ generate.artificial.data <- function(num.entities = NULL, threshold = 0.5, num.f
   }
   M <- M_gr + M_cr + M_x
   
-  ## Compute each flow
+  ## Decompose the covariate flow into gradient and curl components
   M_gx <- as.vector((G %*% t(G) %*% M_x) / num.entities) # Projection of M_x to Gradient space
   M_cx <- M_x - M_gx                                     # Projection of M_x to Curl space
   flows <- data.frame(
@@ -1720,7 +1866,8 @@ run.simulation <- function(num.cores = parallel::detectCores() - 1, num.replica 
     model.priors <- list(
       threshold = 0.5, beta = 0, u = 0, z = 0, 
       lambda = 1, nu = 1, tau= 1, xi = 1,
-      sigma_u = 2.5, sigma_beta = 2.5
+      sigma_u = 2.5, sigma_beta = 2.5,
+      a = 0.5, b = 0.5
     )
   }
   
@@ -1729,7 +1876,7 @@ run.simulation <- function(num.cores = parallel::detectCores() - 1, num.replica 
     R_g <- mean(chains$R_g)
     R_c <- 1 - R_g
     
-    # Process with reparametrized grad/curl
+    # Process with reparameterized grad/curl
     if (model == "ICBT") {
       chains$grad <- chains$grad.reparam
       chains$curl <- chains$curl.reparam
@@ -1861,6 +2008,7 @@ run.simulation <- function(num.cores = parallel::detectCores() - 1, num.replica 
               ops <- build.hodge_operators(num.entities, X_E = X_E)
             } else if (include_cov) {
               X_E <- X_E_raw
+              ops <- build.hodge_operators(num.entities, X_E = X_E_raw)
             } else {
               X_E <- NULL
               ops <- ops_null
@@ -2242,7 +2390,7 @@ run.simulation.incompleteness <- function(num.cores = parallel::detectCores() - 
 
 ## OUTPUT:
 # Returns an invisible TRUE if all write operations succeed.
-# Automatically creates CSV files based on the list names (e.g., 'Raw_10.csv').
+# Automatically creates CSV files based on the list names (e.g., 'Raw.csv').
 
 store.csv <- function(results = NULL, file.name = "results") {
   all.success <- TRUE # Track overall success
@@ -2410,6 +2558,8 @@ print.simulation_summary.incompleteness <- function(df.list = NULL, missing.frag
 
 ##############################  END Simulations  ###############################
 
+
+
 ######################  BEGIN Functions for Visualization  #####################
 
 ###-----------------------------------------###
@@ -2496,6 +2646,178 @@ plot.FBR <- function(mcmc.M, num.entities = NULL, names = NULL, alpha.vec = c(0.
   plots.combined <- patchwork::wrap_plots(plot.list, ncol = 1)
   return(plots.combined)
 }
+
+
+
+
+###---------------------------------------###
+###    Plot Dominance Graph (DG)          ###
+###---------------------------------------###
+
+## INPUT:
+# mcmc.M:       A matrix of MCMC samples for the latent match-up function 'M';
+# num.entities: Number of entities (e.g., items or players);
+# names:        Optional vector of entity names. If NULL, numeric labels are used;
+# alpha.vec:    A vector of target BFDR levels (e.g., c(0.05, 0.1, 0.15, 0.2));
+# layout:       Character string specifying the layout (default "circle").
+
+## OUTPUT:
+# A patchwork object containing the arranged network plots horizontally.
+
+plot.DG <- function(mcmc.M, num.entities = NULL, names = NULL, 
+                    alpha.vec = c(0.05, 0.1), layout = "circle")
+  {
+  num.pairs <- choose(num.entities, 2)
+  if (is.null(names)) names <- as.character(1:num.entities)
+
+  ## Construct the posterior preference matrix Q and compute entity strength
+  Q <- matrix(0, num.entities, num.entities)
+  q_i <- colMeans(mcmc.M > 0)
+  q_j <- colMeans(mcmc.M < 0)
+  
+  pair.idx <- 1
+  for (i in 1:(num.entities - 1)) {
+    for (j in (i + 1):num.entities) {
+      Q[i, j] <- q_i[pair.idx]
+      Q[j, i] <- q_j[pair.idx]
+      pair.idx <- pair.idx + 1
+    }
+  }
+  strength <- rowSums(Q)
+  
+  ## Construct the base graph
+  alpha_max <- max(alpha.vec)
+  res_max <- calibrate.DG(mcmc.M, num.entities, alpha_max)
+  g_max <- igraph::make_empty_graph(n = num.entities, directed = TRUE)
+  igraph::V(g_max)$name <- names
+  
+  if (nrow(res_max$edges) > 0) {
+    g_max <- igraph::add_edges(g_max, as.vector(t(res_max$edges)))
+  }
+  
+  ## Create a common natural layout for all plots
+  g_max <- tidygraph::as_tbl_graph(g_max)
+  igraph::V(g_max)$strength <- strength
+  lyt_base <- ggraph::create_layout(g_max, layout = layout)
+  fixed_coords <- as.matrix(lyt_base[, c("x", "y")])
+  
+  ## Draw the graph for each alpha
+  plot.list <- list()
+  for (alpha in alpha.vec) {
+    results.list <- calibrate.DG(mcmc.M, num.entities, alpha)
+    edges <- results.list$edges
+    theta_upper <- results.list$theta_upper
+    theta_lower <- results.list$theta_lower
+    BFDR <- results.list$BFDR
+    edge_ratio <- nrow(edges) / num.pairs
+    
+    g <- igraph::make_empty_graph(n = num.entities, directed = TRUE)
+    igraph::V(g)$name <- names
+    
+    if (nrow(edges) > 0) {
+      g <- igraph::add_edges(g, as.vector(t(edges)))
+      
+      edge_probs <- Q[as.matrix(edges[, 1:2, drop = FALSE])]
+      igraph::E(g)$prob <- edge_probs
+      
+      # Detect cycles
+      scc <- igraph::components(g, mode = "strong")
+      mem <- scc$membership
+      
+      el <- igraph::as_edgelist(g, names = FALSE)
+      cycle_types <- character(nrow(el))
+      
+      for (k in seq_len(nrow(el))) {
+        u <- el[k, 1]
+        v <- el[k, 2]
+        in_scc <- (mem[u] == mem[v])
+        
+        if (in_scc) {
+          cycle_types[k] <- "In a directed cycle"
+        } else {
+          cycle_types[k] <- "Not in a directed cycle"
+        }
+      }
+      
+      igraph::E(g)$cycle_type <- cycle_types
+      igraph::E(g)$cycle_factor <- factor(cycle_types, levels = c("Not in a directed cycle", "In a directed cycle"))
+    }
+    
+    igraph::V(g)$out_degree <- igraph::degree(g, mode = "out")
+    igraph::V(g)$is_hub <- as.character(igraph::degree(g, mode = "all") == (num.entities - 1))
+    
+    g <- tidygraph::as_tbl_graph(g)
+    
+    # Control the drawing order
+    if (nrow(edges) > 0) {
+      g <- g %>%
+        tidygraph::activate(edges) %>%
+        dplyr::arrange(cycle_factor)
+    }
+    
+    lyt_current <- ggraph::create_layout(g, layout = fixed_coords)
+    
+    # Format the title label (removed A/E representation)
+    label <- bquote(alpha == .(alpha) * "," ~~
+                      BFDR == .(sprintf("%.4f", BFDR))  * "," ~~
+                      epsilon %in% "[" * .(sprintf("%.3f", theta_lower)) * "," ~~
+                      .(sprintf("%.3f", theta_upper)) * ")")
+    
+    p_graph <- ggraph::ggraph(graph = lyt_current)
+    degree_breaks <- unique(round(seq(0, num.entities - 1, length.out = 4)))
+    
+    if (nrow(edges) > 0) {
+      p_graph <- p_graph + 
+        ggraph::geom_edge_arc(aes(start_cap = ggraph::label_rect(node1.name, padding = margin(6, 6, 6, 6, "mm")), 
+                                  end_cap   = ggraph::label_rect(node2.name, padding = margin(6, 6, 6, 6, "mm")),
+                                  color = cycle_type,
+                                  edge_width = cycle_type), 
+                              strength = 0.08, 
+                              arrow = arrow(length = unit(2, 'mm'), type = "closed")) +
+        ggraph::scale_edge_alpha_continuous(range = c(0.4, 1.0), guide = "none") +
+        ggraph::scale_edge_color_manual(values = c("Not in a directed cycle" = "grey30", 
+                                                   "In a directed cycle" = "red"),
+                                        name = "", drop = FALSE,
+                                        guide = guide_legend(order = 1)) +
+        ggraph::scale_edge_width_manual(values = c("Not in a directed cycle" = 0.5, 
+                                                   "In a directed cycle" = 1.0),
+                                        guide = "none", drop = FALSE)
+    }
+    
+    p_graph <- p_graph + 
+      ggraph::geom_node_label(aes(label = name, fill = out_degree), color = "black",
+                              size = 5, label.padding = unit(0.5, "lines"), 
+                              label.r = unit(0.2, "lines")) +
+      ggraph::geom_node_text(aes(label = name), color = "black", size = 5) + 
+      scale_color_manual(values = c("TRUE" = "magenta", "FALSE" = "black"), guide = "none") +
+      scale_fill_gradient(low = "white", high = "lightgreen", name = "Out-degree ", 
+                          limits = c(0, num.entities-1),
+                          breaks = degree_breaks,
+                          guide = guide_colorbar(order = 2)) +
+      scale_x_continuous(expand = expansion(mult = 0.15)) +
+      scale_y_continuous(expand = expansion(mult = 0.15)) +
+      labs(title = label) + 
+      coord_cartesian(clip = "off") +
+      theme_void() +
+      theme(
+        plot.title = element_text(size = 18, hjust = 0.5, face = "bold", margin = margin(b = 10)),
+        plot.margin = margin(10, 10, 10, 10)
+      )
+    
+    plot.list[[length(plot.list) + 1]] <- p_graph
+  }
+  
+  plots.combined <- patchwork::wrap_plots(plot.list, nrow = 1) + 
+    patchwork::plot_layout(guides = "collect") & 
+    theme(legend.position = "bottom",
+          legend.box = "vertical",
+          legend.text = element_text(size = 14),
+          legend.title = element_text(size = 18)
+    )
+  
+  return(plots.combined)
+}
+
 
 
 
@@ -2605,12 +2927,15 @@ plot.flows <- function(model = NULL, mcmc.result = NULL, num.entities = NULL, na
   ## Preparation
   plot.list <- list()
   num.pairs <- choose(num.entities, 2)
+  pairs <- t(combn(num.entities, 2))
   if (model == "CA-BIBT") {
     Types <- c("grad_cov", "grad_res", "grad", "curl_cov", "curl_res", "curl", "M")
   } else if (model == "BIBT") {
     Types <- c("grad", "curl", "M")
   } else if (model == "CARE") {
     Types <- c("grad_cov", "grad_res", "M")
+  } else if (model == "ICBT") {
+    Types <- c("grad.reparam", "curl.reparam", "M")
   } else {
     Types <- c("grad", "M")
   }
@@ -2630,7 +2955,7 @@ plot.flows <- function(model = NULL, mcmc.result = NULL, num.entities = NULL, na
   for (type in Types) {
     pos.mean <- colMeans(mcmc.result[[type]], na.rm = TRUE)
     type.mat <- matrix(0, num.entities, num.entities)
-    type.mat[upper.tri(type.mat, diag = FALSE)] <- pos.mean
+    type.mat[pairs] <- pos.mean
     type.mat <- type.mat - t(type.mat)
     rownames(type.mat) <- colnames(type.mat) <- names
     
@@ -3486,20 +3811,20 @@ plot.simulation.incompleteness.CP_CIL <- function(results.list = NULL, Types = c
 
 
 ###----------------------------------------###
-###    Plot Histgram of Local Vorticity    ###
+###    Plot Histogram of Local Vorticity    ###
 ###----------------------------------------###
 
 ## INPUT: 
 # means: Numeric vector. Posterior means of local vorticity.
 
 ## OUTPUT:
-# Plots the histgram of local vorticity.
+# Plots the histogram of local vorticity.
 
 plot.vorticity.hist <- function(means = NA) {
   ## Set up the plotting area
   par(mfrow = c(1, 1), mar = c(4, 4, 2, 1), oma = c(1, 1, 1, 1))
   
-  ## Plot Histgram
+  ## Plot Histogram
   hist(means, 
        breaks = 50, 
        col = "gray70", 
@@ -3593,7 +3918,7 @@ plot.vorticity.forest <- function(results, names, top_k = 8, hpd = TRUE, level =
   axis(2, at = 1:top_k, labels = data.plot$triad_name, las = 2, cex.axis = 1.2)
   
   ## Print significant triads ratio
-  paste("Significant Triads: ", sum(lower > 0 | upper < 0), " / ", num.triplets)
+  cat(sprintf("Significant Triads: %d / %d\n", sum(lower > 0 | upper < 0), num.triplets))
 }
 
 ######################  END Functions for Visualization  #######################

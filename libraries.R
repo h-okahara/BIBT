@@ -11,7 +11,7 @@ library(cmdstanr)       # Runs Stan models from R
 library(coda)           # MCMC output analysis and diagnostics
 library(DomArchive)     # Datasets for animal dominance hierarchies
 library(dplyr)          # A grammar of data manipulation
-library(ggplot2)        # Create elegant data visualisations
+library(ggplot2)        # Create elegant data visualizations
 library(ggraph)         # Grammar of graphics for graphs and networks
 library(igraph)         # Network analysis and visualization
 library(MASS)           # General modern applied statistics functions
@@ -20,7 +20,7 @@ library(parallel)       # Support for parallel computation
 library(patchwork)      # Combines multiple ggplot2 plots into one layout
 library(pbmcapply)      # Parallel computing with progress bars
 library(pg)             # Pólya-Gamma data augmentation in C++
-library(purrr)          # Import R codes of ICBT model (Spearing et al.,2023)
+library(purrr)          # Functional programming tools (used to source the ICBT model scripts)
 library(reshape2)       # Convert wide data to long form
 library(Rcpp)           # Runs C++ code from R
 library(scales)         # Rescales data for visualization
