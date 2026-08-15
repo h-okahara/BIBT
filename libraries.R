@@ -5,9 +5,7 @@
 #
 ########################  BEGIN import libraries  ##############################
 
-library(BayesLogit)     # Pólya-Gamma data augmentation
 library(BradleyTerry2)  # Fits Bradley-Terry model
-library(cmdstanr)       # Runs Stan models from R
 library(coda)           # MCMC output analysis and diagnostics
 library(DomArchive)     # Datasets for animal dominance hierarchies
 library(dplyr)          # A grammar of data manipulation
