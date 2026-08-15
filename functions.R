@@ -1819,9 +1819,9 @@ generate.artificial.data <- function(num.entities = NULL, threshold = 0.5, num.f
 
 
 
-###---------------------------------------------###
-###    Run Simulation for Section 5 and S4.1    ###
-###---------------------------------------------###
+###----------------------###
+###    Run Simulation    ###
+###----------------------###
 
 ## INPUT:
 # num.cores:        Integer. The number of CPU cores to use for parallel processing;
@@ -2083,8 +2083,7 @@ run.simulation <- function(num.cores = parallel::detectCores() - 1, num.replica 
 
 
 ###------------------------------------###
-###       Run Simulation for S4.2      ###
-###  (Robustness for Incomplete Data)  ###
+###   Robustness for Incomplete Data   ###
 ###------------------------------------###
 
 ## INPUT:
@@ -3409,7 +3408,6 @@ plot.reversed_edges <- function(graphs.estimated = NULL, graphs.true = NULL, lay
 
 ###---------------------------------------###
 ###    Plot Line Graph for Simulations    ###
-###    in Section 5 and S4.1              ###
 ###---------------------------------------###
 
 ## INPUT: 
@@ -3545,9 +3543,9 @@ plot.simulation <- function(results.list = NULL, Types = c("MSE", "sMSE", "Accur
 
 
 
-###----------------------------------------------###
-###    Plot Line Graph for Simulation in S4.2    ###
-###----------------------------------------------###
+###------------------------------------------------------###
+###    Plot Line Graph for Incomplete Data Simulation    ###
+###------------------------------------------------------###
 
 ## INPUT: 
 # results.list: A list of data frames (e.g. from run.simulation.incompleteness) or a single data frame;
@@ -3686,9 +3684,9 @@ plot.simulation.incompleteness <- function(results.list = NULL, missing.frag = F
 
 
 
-###----------------------------------------------###
-###    Plot Line Graph for CP and CIL in S4.2    ###
-###----------------------------------------------###
+###--------------------------------------------------------###
+###    Plot Line Graph for CP and CIL (Incomplete Data)    ###
+###--------------------------------------------------------###
 
 ## INPUT: 
 # results.list: A list of data frames (e.g. from run.simulation.incompleteness) or a single data frame;
@@ -3811,7 +3809,7 @@ plot.simulation.incompleteness.CP_CIL <- function(results.list = NULL, Types = c
 
 
 ###----------------------------------------###
-###    Plot Histogram of Local Vorticity    ###
+###    Plot Histogram of Local Vorticity   ###
 ###----------------------------------------###
 
 ## INPUT: 
