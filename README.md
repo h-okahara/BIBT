@@ -33,6 +33,7 @@ This allows the model to distinguish whether observed intransitivity is explaine
 - `libraries.R`   : Loads the required R packages for the project.
 - `database.R`    : Example dataset used in the manuscript.
 - `RJMCMC alg`    : External implementation of the **Intransitive Clustered Bradley-Terry (ICBT)** model (Spearing et al., 2023), sourced from [JessSpearing/ICBT_model](https://github.com/JessSpearing/ICBT_model).
+- `results/`      : Aggregated output of the simulation studies reported in the manuscript.
 
 ## Getting Started
 1. Ensure you have a C++ compiler installed for `Rcpp` compatibility.
