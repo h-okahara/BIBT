@@ -2,7 +2,7 @@
 # This is the main execution script, divided into 3 main parts:
 # 1. Import & Setting:      Loads libraries, C++ functions, subroutines, and datasets.
 # 2. MCMC & Visualization:  Runs the specified model on real (artificial) data and plots posteriors/networks.
-# 3. Simulations:           Runs simulation studies (Sections 5, S4.1, and S4.2) and saves results.
+# 3. Simulations:           Runs simulation studies and saves results.
 #
 ######################  BEGIN Import & Setting  ################################
 
@@ -38,7 +38,7 @@ PARAMS.DEFAULT <- list(
   u_mean = 0, u_sd = 1.0, s_mean = 0, s_sd = 1.0,       # Score / Gradient
   z_mean = 0, z_sd = 1.0,                               # Curl / Triangular
   Phi_norm = 1.0, sparsity.level = 0.6
-  )
+)
 params.true <- generate.flows(num.entities = num.entities, 
                               dim.cov = dim.cov, params.true = PARAMS.DEFAULT)
 X_E <- params.true$X_E
@@ -63,7 +63,7 @@ num.chains <- 1
 num.iter <- 10000
 num.burn <- num.iter/5
 model <- "CA-BIBT"        # Options: (CA-BIBT, BIBT, CARE, BBT, ICBT)
-param.name <- "beta"      # Options: name %in% MODEL.PARAMS
+param.name <- "M"      # Options: name %in% MODEL.PARAMS
 
 ## Prior specification
 model.priors <- list(X_E = X_E, threshold = 0.5, 
@@ -97,7 +97,7 @@ print.Ratios(mcmc.results$all.mcmc, model) # Print flow contribution ratios
 plot.FBR(mcmc.M = mcmc.results$all.mcmc[[1]]$M, num.entities = num.entities, # Plot the finest blockwise rankings 
          names = entity.name, alpha.vec = c(0.01, 0.05, 0.1))
 plot.DG(mcmc.M = mcmc.results$all.mcmc[[1]]$M, num.entities = num.entities, 
-        names = entity.name, layout = "circle", alpha.vec = c(1e-4))
+        names = entity.name, layout = "circle", alpha.vec = c(0.001))
 
 ## Plot LV
 LV.mcmc      <- mcmc.extract(mcmc.results$all.mcmc, num.entities, name = "LV")
@@ -150,33 +150,33 @@ model.priors <- list(threshold = 0.5, beta = 0, u = 0, z = 0,
                      sigma_u = 2.5, sigma_beta = 2.5,
                      a = 0.5, b = 0.5)
 
-## Simulation for Comparing Models in Section 5 and S4.1
-
+## Simulation for Comparing Models
 result.list <- run.simulation(num.cores = num.cores, num.replica = num.replica,
                               num.entities = num.entities, dim.cov = dim.cov, num.freq = num.freq,
                               R_x.vec = seq(0.1, 0.9, by = 0.1), alpha = 1.0,
                               models = models, mcmc.params = mcmc.params, model.priors = model.priors)
-success.flag <- store.csv(result.list, file.name = paste0("result_Model5_N", num.entities, "_n", num.freq, "_E1"))
+success.flag <- store.csv(result.list, file.name = file.path("results", paste0("Model5_N", num.entities, "_n", num.freq, "_E1")))
 
-df.list <- read.csv(file.path(getwd(), paste0("result_Model5_N", num.entities, "_n", num.freq, "_E1/Aggregated.csv"))) # For Section 5
-# df1 <- read.csv(file.path(getwd(), paste0("result_Model4_N", num.entities, "_n", num.freq, "_E1/Aggregated.csv")))     # For S4.1
-# df025 <- read.csv(file.path(getwd(), paste0("result_Model4_N", num.entities, "_n", num.freq, "_E025/Aggregated.csv"))) # For S4.1
+df.list <- read.csv(file.path(getwd(), "results", paste0("Model5_N", num.entities, "_n", num.freq, "_E1.csv")))   # For main article
+# Model4 = models excluding ICBT, i.e. models <- c("BBT", "CARE", "BIBT", "CA-BIBT"); stored run used num.entities = 30
+# df1 <- read.csv(file.path(getwd(), "results", "Model4_N30_n20_E1.csv"))     # For Supplementary Materials
+# df025 <- read.csv(file.path(getwd(), "results", "Model4_N30_n20_E025.csv")) # For Supplementary Materials
 # df.list <- list(df025, df1)
 plot.simulation(df.list, Types = c("sMSE", "Accuracy"), models = models)   # Plot the resulting sMSE and Accuracy
-print.simulation_summary(df.list, models = models, Types = c("CP", "CIL")) # Print means of coverage probabilities 
-                                                                           # and execution times
+print.simulation_summary(df.list, models = models, Types = c("CP", "CIL")) # Print means of Coverage Probabilities (CP) and Credible Interval Length (CIL)
 
-## Simulation for Incomplete Data in S4.2
+## Simulation for Incomplete Data
+## Reuses num.cores, num.replica, num.entities, num.freq, dim.cov, and model.priors from the "Setting" block above.
 result.list <- run.simulation.incompleteness(num.cores = num.cores, num.replica = num.replica,
                                              num.entities = num.entities, d_true = d_true, d.vec = d.vec,
                                              num.freq = num.freq, R_x = 0.3, alpha = 1.0,
                                              rho.vec = seq(0.5, 1.0, by = 0.1), model.priors = model.priors,
                                              mcmc.params = list(mcmc = 10000, burn = 2000, thin = 1, level = 0.95))
-success.flag <- store.csv(result.list, file.name = paste0("result_incomplete_d", d_true, "_N", num.entities, "_n", num.freq, "_E1"))
+success.flag <- store.csv(result.list, file.name = file.path("results", paste0("Incomplete_d", d_true, "_N", num.entities, "_n", num.freq, "_E1")))
 
-df.incom <- read.csv(file.path(getwd(), paste0("result_incomplete_d", d_true, "_N", num.entities, "_n", num.freq, "_E1/Aggregated.csv")))
+df.incom <- read.csv(file.path(getwd(), "results", "Incomplete_d10_N20_n20_E1.csv")) # NOTE: stored run used num.entities = 20; the "Setting" block above currently uses 10 — see flagged mismatch
 plot.simulation.incompleteness(df.incom, missing.frag = TRUE, Types = c("sMSE", "Accuracy"))       # Plot the resulting sMSE and Accuracy
-plot.simulation.incompleteness.CP_CIL(df.incom, Types = c("CP", "CIL"), level = mcmc.params$level) # Plot or print means of Coverage Probabilities (CP) and Credible Interval Length (CIL)
+# plot.simulation.incompleteness.CP_CIL(df.incom, Types = c("CP", "CIL"), level = mcmc.params$level) # Plot or print means of Coverage Probabilities (CP) and Credible Interval Length (CIL)
 print.simulation_summary.incompleteness(df.incom, missing.frag = FALSE, Types = c("CP", "CIL"))
-  
+
 ##############################  END Simulations  ###############################
